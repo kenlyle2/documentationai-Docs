@@ -1,0 +1,167 @@
+---
+title: Integrations with PostGlider
+description: Connect PostGlider to your favorite social platforms and third-party services to automate posting and streamline your workflow seamlessly.
+---
+
+## Overview
+
+PostGlider integrates seamlessly with major social media platforms and third-party services. You can link your accounts to automate post publishing, receive tailored content suggestions, and set up webhooks for custom notifications.
+
+<Columns cols={3}>
+  <Card title="Social Platforms" icon="share-2" href="#social-integrations">
+    Connect Instagram, Facebook, Twitter, and TikTok directly.
+  </Card>
+  <Card title="Third-Party Apps" icon="plug" href="#third-party">
+    Integrate with Zapier, Slack, and more for extended automation.
+  </Card>
+  <Card title="Webhooks" icon="zap" href="#webhooks">
+    Receive real-time events via custom webhook endpoints.
+  </Card>
+</Columns>
+
+<Callout kind="tip">
+  Start with social platform connections for immediate value, then expand to webhooks for advanced automation.
+</Callout>
+
+## Social Media Integrations
+
+Connect PostGlider to your social accounts to publish generated posts automatically.
+
+<Tabs>
+  <Tab title="Instagram & Facebook" icon="instagram">
+    ## Link Instagram and Facebook
+
+    Use Meta Business Suite for seamless integration.
+
+    <Steps>
+      <Step title="Create Meta App" icon="settings">
+        Go to [Meta for Developers](https://developers.facebook.com/) and create a new app.
+      </Step>
+      <Step title="Add Permissions" icon="shield">
+        Request `pages_manage_posts` and `instagram_basic` scopes.
+      </Step>
+      <Step title="Connect in Dashboard" icon="link">
+        In your PostGlider dashboard at `https://dashboard.postglider.com/integrations`, paste your app ID and secret.
+      </Step>
+    </Steps>
+
+    <ParamField header="Authorization" param-type="string" required="true">
+      Bearer token from Meta: `YOUR_META_TOKEN`.
+    </ParamField>
+  </Tab>
+
+  <Tab title="Twitter & TikTok" icon="twitter">
+    ## Setup Twitter (X) and TikTok
+
+    Authorize via OAuth for each platform.
+
+    <Steps>
+      <Step title="Twitter OAuth" icon="key">
+        Generate API keys at [developer.twitter.com](https://developer.twitter.com).
+      </Step>
+      <Step title="TikTok Developer" icon="video">
+        Register at [developers.tiktok.com](https://developers.tiktok.com) and get client credentials.
+      </Step>
+      <Step title="Authorize in PostGlider" icon="check-circle">
+        Visit `https://dashboard.postglider.com/integrations/twitter` and complete OAuth flow.
+      </Step>
+    </Steps>
+
+    ```javascript
+    // Example Twitter API call from PostGlider
+    const tweet = await fetch('https://api.twitter.com/2/tweets', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer YOUR_TWITTER_BEARER' },
+      body: JSON.stringify({ text: 'Daily post from PostGlider!' })
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Third-Party App Connections
+
+Extend PostGlider with popular automation tools.
+
+<Columns cols={2}>
+  <Card title="Zapier" icon="zap" href="https://zapier.com/apps/postglider/integrations" target="_blank">
+    Trigger Zaps on new post ideas. No code required.
+  </Card>
+  <Card title="Slack Notifications" icon="message-circle" href="#slack-setup">
+    Get post suggestions in your Slack channel.
+  </Card>
+</Columns>
+
+## Webhook Configuration
+
+Set up webhooks to receive events like `post_generated` or `post_published`.
+
+### Steps to Configure
+
+<Steps>
+  <Step title="Generate Webhook URL" icon="link">
+    In dashboard: `https://dashboard.postglider.com/webhooks/new`.
+  </Step>
+  <Step title="Subscribe to Events" icon="bell">
+    Select events and paste your endpoint URL.
+  </Step>
+  <Step title="Verify Signature" icon="shield">
+    Use HMAC SHA-256 with your webhook secret.
+  </Step>
+</Steps>
+
+<CodeGroup tabs="Node.js,Python">
+  ```javascript
+  const crypto = require('crypto');
+  app.post('/webhook', (req, res) => {
+    const signature = req.headers['x-postglider-signature'];
+    const hash = crypto.createHmac('sha256', 'YOUR_WEBHOOK_SECRET')
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+    if (signature === `sha256=${hash}`) {
+      console.log('Post generated:', req.body);
+      res.status(200).send('OK');
+    }
+  });
+  ```
+  ```python
+  import hmac
+  import hashlib
+  from flask import Flask, request
+
+  app = Flask(__name__)
+  SECRET = 'YOUR_WEBHOOK_SECRET'
+
+  @app.route('/webhook', methods=['POST'])
+  def webhook():
+      signature = request.headers.get('X-Postglider-Signature')
+      body = request.get_data()
+      expected = hmac.new(
+          SECRET.encode(), body, hashlib.sha256
+      ).hexdigest()
+      if signature == f'sha256={expected}':
+          print('Post generated:', request.json)
+          return 'OK', 200
+  ```
+</CodeGroup>
+
+<ParamField query="event" param-type="string" required="true">
+  Event types: `post_generated`, `post_published`, `error`.
+</ParamField>
+
+## Troubleshooting
+
+<ExpandableGroup>
+  <Expandable title="Common Integration Errors" default-open="true">
+    - **401 Unauthorized**: Regenerate API tokens and ensure scopes match.
+    - **Webhook 4xx**: Check endpoint accessibility from `https://api.postglider.com`.
+    - **Rate Limits**: Space out posts; view limits in dashboard.
+  </Expandable>
+
+  <Expandable title="Test Integration">
+    Use PostGlider's test mode: Toggle in dashboard settings to simulate posts without publishing.
+  </Expandable>
+</ExpandableGroup>
+
+<Callout kind="info">
+  For support, check status at `https://status.postglider.com` or contact via dashboard.
+</Callout>

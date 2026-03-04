@@ -1,0 +1,142 @@
+---
+title: Getting Started with PostGlider
+description: Quickly set up your PostGlider account, connect your social media profiles, and generate your first post idea to begin automating your content strategy.
+---
+
+## Prerequisites
+
+<Callout kind="info" title="Before You Begin">
+Ensure you have:
+- An email address for account registration
+- Active social media accounts on Instagram, X (Twitter), Facebook, TikTok, or YouTube
+- A local business profile ready to customize (business name, niche, target audience)
+</Callout>
+
+<Image
+  src="https://images.unsplash.com/photo-1676276375914-cc102df16fa9?q=85&w=1100&h=450&fit=crop"
+  alt="Team reviewing social media content calendar on a whiteboard with platforms like Twitter, TikTok, Instagram, and Facebook."
+  width="1100"
+  height="450"
+/>
+
+## Create Your PostGlider Account
+
+Follow these steps to sign up and access your dashboard.
+
+<Steps>
+  <Step title="Visit the Signup Page" icon="external-link">
+    Navigate to [https://postglider.vercel.app/start](https://postglider.vercel.app/start) and click `Try Free` or `Sign Up`.
+  </Step>
+
+  <Step title="Enter Your Details" icon="user">
+    Provide your email, create a password, and enter your business name. Accept the terms and click `Create Account`.
+
+    <Callout kind="tip">
+      Use a business email for easier account recovery.
+    </Callout>
+  </Step>
+
+  <Step title="Verify Email" icon="mail">
+    Check your inbox for a verification email from PostGlider and click the link to activate your account.
+  </Step>
+</Steps>
+
+## Connect Social Media Accounts
+
+PostGlider supports major platforms. Use the dashboard's `Connect Accounts` section to link them one by one.
+
+<Tabs>
+  <Tab title="Instagram" icon="instagram">
+    Click `Connect Instagram`, log in to your Meta account, select your business profile, and authorize PostGlider.
+  </Tab>
+
+  <Tab title="X (Twitter)" icon="twitter">
+    Select `Connect X`, sign in with your X credentials, and grant permission for posting and scheduling.
+  </Tab>
+
+  <Tab title="Facebook" icon="facebook">
+    Go to `Connect Facebook`, log into Facebook Business Manager, and link your Page.
+  </Tab>
+
+  <Tab title="TikTok" icon="tiktok">
+    Choose `Connect TikTok`, authenticate your account, and enable content generation access.
+  </Tab>
+</Tabs>
+
+## Customize Your Profile
+
+Tailor PostGlider to your business for personalized post ideas.
+
+<Steps>
+  <Step title="Set Business Details" icon="settings">
+    In the dashboard, go to `Profile > Business Info`. Enter your niche (e.g., "coffee shop"), location, and target audience (e.g., "local families").
+  </Step>
+
+  <Step title="Choose Posting Preferences" icon="calendar">
+    Select preferred posting times, tone (e.g., "friendly and engaging"), and content themes (e.g., "promotions, behind-the-scenes").
+  </Step>
+
+  <Step title="Save Changes" icon="check-circle">
+    Review and save. PostGlider will generate a sample weekly calendar.
+  </Step>
+</Steps>
+
+## Generate and Schedule Your First Post
+
+Now create your first content idea.
+
+<Steps>
+  <Step title="Request Post Idea" icon="zap">
+    Click `Generate Daily Post` in the dashboard. PostGlider analyzes your profile and suggests a tailored idea.
+  </Step>
+
+  <Step title="Review and Edit" icon="edit">
+    View the caption, hashtags, and optimal timing. Edit as needed.
+
+    Here's an example generated post:
+
+    ```json
+    {
+      "platform": "Instagram",
+      "caption": "Freshly brewed coffee awaits ☕ What's your go-to order? Drop it in the comments! #LocalCoffee #MorningBrew",
+      "hashtags": ["CoffeeShop", "LocalBusiness", "GoodMorning"],
+      "optimalTime": "2024-10-15T08:00:00Z",
+      "imageSuggestion": "Cozy coffee cup steam rising"
+    }
+    ```
+  </Step>
+
+  <Step title="Schedule or Post Now" icon="schedule">
+    Click `Schedule` to add to your calendar or `Post Now` for immediate publishing.
+  </Step>
+</Steps>
+
+## Explore the Dashboard
+
+Navigate key sections to manage your content strategy.
+
+<Columns cols={3}>
+  <Card title="Content Calendar" icon="calendar" href="#content-calendar">
+    View upcoming posts, edit schedules, and track performance.
+  </Card>
+
+  <Card title="Analytics" icon="bar-chart-3" href="#analytics">
+    Monitor engagement metrics across all connected platforms.
+  </Card>
+
+  <Card title="Settings" icon="settings" href="#settings">
+    Manage accounts, profile, and notification preferences.
+  </Card>
+</Columns>
+
+## Next Steps
+
+<Callout kind="tip" title="Ready for More?">
+Dive deeper into advanced features like analytics and automation. Check out [Authentication](/authentication) for API access or the [Introduction](/introduction) for an overview.
+</Callout>
+
+<Expandable title="Troubleshooting Common Issues" default-open="false">
+- **Connection Failed**: Ensure your social account has business/creator mode enabled.
+- **No Post Ideas**: Update your profile with more business details.
+- **Scheduling Errors**: Verify posting permissions in connected accounts.
+</Expandable>
