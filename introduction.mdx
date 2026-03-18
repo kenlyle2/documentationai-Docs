@@ -1,22 +1,14 @@
 ---
 title: Introduction to PostGlider
-description: Discover PostGlider, an AI assistant that generates daily tailored social media post ideas, captions, and timing suggestions for local businesses to maintain consistent online presence effortlessly.
+description: >-
+  PostGlider helps users create, manage, and schedule social media posts easily.
+
+  This guide will walk you through how to use the platform, from setting up your
+  account to publishing your first post.
 ---
-
-<Callout kind="info" title="Starter Kit Template">
-This documentation was generated as a starter kit template based on your brand. Please review and customize the content to accurately reflect your product's features, APIs, and capabilities.
-</Callout>
-
 ## Overview
 
-PostGlider is your AI-powered assistant designed to simplify social media management for local businesses. It generates daily post ideas, ready-to-use captions, and optimal posting times tailored to your audience. You maintain a consistent online presence without the daily stress of content creation.
-
-<Image
-  src="https://images.unsplash.com/photo-1676276375914-cc102df16fa9?q=85&w=1100&h=450&fit=crop"
-  alt="Team planning social media content calendar on a whiteboard with sections for Twitter, TikTok, Instagram, and Facebook."
-  width="1100"
-  height="450"
-/>
+<Image src="https://images.unsplash.com/photo-1676276375914-cc102df16fa9?q=85&w=1100&h=450&fit=crop" width="1100" height="450" alt="Team planning social media content calendar on a whiteboard with sections for Twitter, TikTok, Instagram, and Facebook." />
 
 PostGlider analyzes your business type, target audience, and platform trends to deliver personalized recommendations. Access everything through a simple dashboard at `https://dashboard.example.com`.
 
@@ -25,35 +17,34 @@ PostGlider analyzes your business type, target audience, and platform trends to 
 You save hours each week on content planning. PostGlider ensures your posts engage customers at peak times, boosting visibility and interactions. Key advantages include:
 
 - **Consistency**: Daily suggestions keep your feed active.
+
 - **Relevance**: Tailored ideas match your local market.
+
 - **Efficiency**: Copy-paste captions and schedules ready to go.
 
-<Callout kind="success">
-PostGlider users report 3x more engagement from consistent posting.
+<Callout kind="success" collapsed="false">
+  PostGlider users report 3x more engagement from consistent posting.
 </Callout>
 
 ## Core Features
 
 Explore PostGlider's main capabilities through these feature highlights:
 
-<Columns cols={3}>
-  <Card title="Daily Post Ideas" icon="zap" href="#getting-started">
+<Columns cols="3">
+  <Card title="Daily Post Ideas" href="#getting-started" icon="zap" horizontal="false">
     Receive fresh, business-specific content ideas every day.
   </Card>
-  <Card title="Smart Captions" icon="edit-3" href="/quickstart">
+
+  <Card title="Smart Captions" href="/quickstart" icon="edit-3" horizontal="false">
     AI-generated captions optimized for each platform.
   </Card>
-  <Card title="Timing Suggestions" icon="clock" href="/configuration">
+
+  <Card title="Timing Suggestions" href="/configuration" icon="clock" horizontal="false">
     Best times to post based on audience data.
   </Card>
 </Columns>
 
-<Image
-  src="https://images.unsplash.com/photo-1694878982234-58d53e0d1655?q=85&w=273&h=462&fit=crop"
-  alt="Social media platform logos for YouTube, TikTok, X (Twitter), and Facebook."
-  width="273"
-  height="462"
-/>
+<Image src="https://images.unsplash.com/photo-1694878982234-58d53e0d1655?q=85&w=273&h=462&fit=crop" width="273" height="462" alt="Social media platform logos for YouTube, TikTok, X (Twitter), and Facebook." />
 
 ## Supported Social Platforms
 
@@ -63,12 +54,15 @@ PostGlider supports major platforms used by local businesses. Switch between the
   <Tab title="Instagram" icon="instagram">
     Perfect for visual stories and reels with tailored captions.
   </Tab>
-  <Tab title="TikTok" icon="video" >
+
+  <Tab title="TikTok" icon="video">
     Short-form video ideas with trending hooks.
   </Tab>
+
   <Tab title="X (Twitter)" icon="twitter">
     Concise updates and engagement prompts.
   </Tab>
+
   <Tab title="Facebook" icon="facebook">
     Community-focused posts for local groups.
   </Tab>
@@ -79,43 +73,48 @@ PostGlider supports major platforms used by local businesses. Switch between the
 Begin using PostGlider in minutes. Follow these steps to generate your first post ideas:
 
 <Steps>
-  <Step title="Create Account" icon="user-plus">
+  <Step title="Create Account" icon="user-plus" title-type="p">
     Sign up at `https://dashboard.example.com/signup` with your email.
   </Step>
-  <Step title="Configure Business" icon="settings">
+
+  <Step title="Configure Business" icon="settings" title-type="p">
     Enter your business type, location, and target audience.
   </Step>
-  <Step title="Generate Ideas" icon="zap">
+
+  <Step title="Generate Ideas" icon="zap" title-type="p">
     Review daily suggestions in the dashboard.
   </Step>
-  <Step title="Schedule & Post" icon="calendar">
+
+  <Step title="Schedule & Post" icon="calendar" title-type="p">
     Copy captions and post at suggested times.
   </Step>
 </Steps>
 
-<CodeGroup tabs="Dashboard API">
-```javascript
-// Fetch daily ideas via API
-const response = await fetch('https://api.example.com/v1/ideas?businessId=YOUR_BUSINESS_ID', {
-  headers: { Authorization: `Bearer ${YOUR_API_KEY}` }
-});
-const ideas = await response.json();
-console.log(ideas);
-```
-```bash
-# CLI example for quick setup
-curl -H "Authorization: Bearer YOUR_API_KEY" \
-     https://api.example.com/v1/ideas?businessId=YOUR_BUSINESS_ID
-```
+<CodeGroup show-lines="true" tabs={[]}>
+  ```javascript
+  // Fetch daily ideas via API
+  const response = await fetch('https://api.example.com/v1/ideas?businessId=YOUR_BUSINESS_ID', {
+    headers: { Authorization: `Bearer ${YOUR_API_KEY}` }
+  });
+  const ideas = await response.json();
+  console.log(ideas);
+  ```
+
+  ```bash
+  # CLI example for quick setup
+  curl -H "Authorization: Bearer YOUR_API_KEY" \
+       https://api.example.com/v1/ideas?businessId=YOUR_BUSINESS_ID
+  ```
 </CodeGroup>
 
 ## Next Steps
 
-<Columns cols={2}>
-  <Card title="Quickstart Guide" icon="book-open" href="/quickstart">
+<Columns cols="2">
+  <Card title="Quickstart Guide" href="/quickstart" icon="book-open" horizontal="false">
     Dive into detailed setup and first posts.
   </Card>
-  <Card title="Configuration" icon="settings" href="/configuration">
+
+  <Card title="Configuration" href="/configuration" icon="settings" horizontal="false">
     Customize your preferences and integrations.
   </Card>
 </Columns>

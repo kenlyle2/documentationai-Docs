@@ -23,6 +23,14 @@
             "icon": "rocket",
             "pages": [
               {
+                "title": "Creating a Post",
+                "path": "creating-a-post"
+              },
+              {
+                "title": "Account Setup",
+                "path": "account-setup"
+              },
+              {
                 "title": "Introduction",
                 "path": "introduction",
                 "icon": "home"
