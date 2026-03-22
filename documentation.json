@@ -23,6 +23,14 @@
             "icon": "rocket",
             "pages": [
               {
+                "title": "Getting Started ",
+                "path": "getting-started-/-onboarding"
+              },
+              {
+                "title": "Scheduling Posts",
+                "path": "scheduling-posts"
+              },
+              {
                 "title": "Creating a Post",
                 "path": "creating-a-post"
               },
