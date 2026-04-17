@@ -30,13 +30,13 @@ Credits are now deducted via a Postgres function using `SELECT ... FOR UPDATE` t
 <Update label="2026-04-12" tags={["feature", "auth"]}>
 ## Anonymous session onboarding
 
-The `/start` onboarding flow now uses anonymous Supabase sessions. Users complete enrichment, GMB confirmation, profile creation, and first post generation before creating an account. At claim, all data is preserved under the same user ID — no re-entry required.
+The `/start` onboarding flow now uses anonymous sessions. Users complete enrichment, GMB confirmation, profile creation, and first post generation before creating an account. At claim, all data is preserved under the same user ID — no re-entry required.
 </Update>
 
 <Update label="2026-04-10" tags={["feature", "wordpress"]}>
 ## Billing bridge
 
-PostGlider users can now access their WooCommerce billing page with a single click. The session bridge validates their Supabase JWT and sets a WordPress auth cookie, eliminating the WP login screen entirely.
+PostGlider users can now access their billing page with a single click. The session bridge authenticates them transparently, eliminating any separate WordPress login screen entirely.
 </Update>
 
 <Update label="2026-04-08" tags={["feature", "intelligence"]}>

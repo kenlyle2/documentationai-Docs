@@ -47,7 +47,7 @@ Every PostGlider account has a gallery token generated automatically at signup.
     Place `pg-install.php` in the same folder as `wp-config.php` using your host's File Manager.
 
     <Callout kind="info">
-      This method is required for Hostinger sites — Hostinger's WordPress admin blocks standard zip uploads. The self-installer bypasses this.
+      This method works on all WordPress hosts and bypasses any upload restrictions in the WordPress admin.
     </Callout>
   </Step>
   <Step title="Run the installer" icon="play" title-type="p">
@@ -58,7 +58,7 @@ Every PostGlider account has a gallery token generated automatically at signup.
   </Step>
   <Step title="Enter your credentials" icon="key" title-type="p">
     Go to **WP Admin → Settings → PostGlider** on your subsite. Enter:
-    - Your Supabase project URL
+    - Your PostGlider service URL (provided by your admin)
     - Your gallery token (copied from PostGlider Settings)
   </Step>
   <Step title="Configure SearchIQ" icon="search" title-type="p">
@@ -107,8 +107,8 @@ You can re-import at any time to pull in new photos added to your GMB listing.
 
 ---
 
-## Loops.so — Email Automation
+## Email Automation
 
-PostGlider uses Loops.so to send lifecycle emails at key activation milestones. No configuration needed on your end — emails fire automatically when you reach each milestone.
+PostGlider sends automated lifecycle emails at key activation milestones. No configuration needed on your end — emails fire automatically when you reach each milestone.
 
 See the [Email Lifecycle section in Account Setup](/account-setup#email-lifecycle) for the full event list.

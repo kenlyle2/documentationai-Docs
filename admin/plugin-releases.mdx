@@ -18,7 +18,7 @@ pg-media-vault/
     postglider-adapter/
       includes/
         auth.php                   ← multisite-aware option helpers (pg_get_option / pg_set_option)
-        search.php                 ← REST endpoint + Supabase proxy
+        search.php                 ← REST endpoint + backend proxy
         admin-settings.php         ← per-subsite settings page (Settings → PostGlider)
         network-api.php            ← POST /wp-json/postglider/v1/configure-site (super admin)
         updater.php                ← polls metadata.json, surfaces WP update notices
@@ -54,7 +54,7 @@ WordPress sites check `metadata.json` every 12 hours. When `version` in `metadat
 ### Initial Install (New Client Site)
 
 <Callout kind="warning">
-  Hostinger's WordPress upload handler rejects plugin zips via the WP admin UI. Use `pg-install.php` for initial installs only.
+  The WordPress admin ZIP upload may be blocked on some hosts. Use `pg-install.php` for initial installs — it bypasses this restriction.
 </Callout>
 
 <Steps>
@@ -62,7 +62,7 @@ WordPress sites check `metadata.json` every 12 hours. When `version` in `metadat
     Get the raw file from the `kenlyle2/pg-media-vault` repo.
   </Step>
   <Step title="Upload to WordPress root" icon="upload" title-type="p">
-    Upload to the same folder as `wp-config.php` via Hostinger File Manager.
+    Upload to the same folder as `wp-config.php` via the hosting File Manager.
   </Step>
   <Step title="Run the installer" icon="play" title-type="p">
     Visit `https://clientsite.mypostglider.website/pg-install.php`. The script creates the plugin files and self-deletes.
@@ -75,7 +75,7 @@ WordPress sites check `metadata.json` every 12 hours. When `version` in `metadat
 All subsequent updates go through the standard WordPress update mechanism — the broken upload UI is never needed again.
 
 <Callout kind="info">
-  The Hostinger App Passwords toggle must be ON. Hostinger disables Application Passwords by default. Enable it at: **Hostinger plugin → Tools → Application Passwords**.
+  The App Passwords toggle must be ON in the hosting control panel. Enable it at: **Hosting control panel → Tools → Application Passwords**.
 </Callout>
 
 ---
@@ -97,7 +97,7 @@ git push
 git tag v1.12.0x && git push origin v1.12.0x
 ```
 
-GitHub Actions builds `supawp.zip`. Download from the release and install via **WP Admin → Plugins → Add New → Upload** on postglider.com. Standard zip upload works here — postglider.com is not Hostinger. Auto-updater polls `metadata.json` every 12 hours thereafter.
+GitHub Actions builds `supawp.zip`. Download from the release and install via **WP Admin → Plugins → Add New → Upload** on postglider.com. Standard zip upload works here. Auto-updater polls `metadata.json` every 12 hours thereafter.
 
 ### Deploying the Edge Function
 

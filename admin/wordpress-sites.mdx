@@ -16,7 +16,7 @@ description: "PostGlider uses two entirely separate WordPress installations with
 
 ## postglider.com — Marketing & Billing
 
-Single-site WordPress. WooCommerce + WP Subscriptions handle all financial transactions: new subscriptions, upgrades, cancellations, and order history. Stripe is the payment processor. Users manage billing via the standard WooCommerce `/my-account` page.
+Single-site WordPress. The billing platform and subscription manager handle all financial transactions: new subscriptions, upgrades, cancellations, and order history. Users manage billing via the `/my-account` page.
 
 <Callout kind="alert">
   There is no plan to make postglider.com a multisite — ever. All billing stays on this single installation.
@@ -24,7 +24,7 @@ Single-site WordPress. WooCommerce + WP Subscriptions handle all financial trans
 
 The `supawp-pg` plugin is installed here solely to serve the `supawp/v1/auth/session` endpoint that gives PostGlider users a seamless WP session when they click **Manage Subscription** in the app.
 
-WordPress users on postglider.com are created automatically by WooCommerce at checkout — every paying subscriber has a WP account.
+WordPress users on postglider.com are created automatically at checkout — every paying subscriber has a WP account.
 
 ## mypostglider.website — SearchIQ / Media Vault
 
@@ -38,19 +38,19 @@ The `pg-media-vault` plugin is network-activated here and exposes the `postglide
 sequenceDiagram
     participant App as PostGlider App
     participant WP as mypostglider.website
-    participant DB as Supabase
+    participant DB as Database
 
     App->>WP: POST /wp-json/wp/v2/sites/create
     WP-->>App: subsite created, slug returned
     App->>DB: profiles.wp_subsite_slug = slug
     App->>WP: POST /wp-json/postglider/v1/configure-site
-    Note over App,WP: Pushes gallery token + Supabase anon key to subsite
+    Note over App,WP: Pushes gallery token + anon key to subsite
 ```
 
 The `apiguy` Application Password (stored as `WP_API_APP_PASSWORD` in `.env.local`) is used for provisioning — super admin credentials.
 
 <Callout kind="info">
-  The Hostinger App Passwords toggle must be ON. Hostinger disables Application Passwords by default. Enable it at: Hostinger plugin → Tools → Application Passwords.
+  The App Passwords toggle must be ON in the hosting control panel. Enable it at: Hosting control panel → Tools → Application Passwords.
 </Callout>
 
 ## Key WordPress Credentials

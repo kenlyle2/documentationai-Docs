@@ -16,7 +16,7 @@ flowchart TD
     G --> H[Return results ordered by quality_score DESC]
 ```
 
-SearchIQ can only index WordPress content — it cannot call external REST APIs directly. The PostGlider Adapter creates thin **stub posts** inside each client's WordPress subsite. SearchIQ indexes these stubs; actual image files never leave Supabase Storage.
+SearchIQ can only index WordPress content — it cannot call external REST APIs directly. The PostGlider Adapter creates thin **stub posts** inside each client's WordPress subsite. SearchIQ indexes these stubs; actual image files never leave PostGlider's storage.
 
 ## Stub Post Structure
 
@@ -44,7 +44,7 @@ The call is fire-and-forget. If the subsite isn't provisioned yet, `syncImageToW
 
 ## Gallery Token Security
 
-Tokens are `pg_gallery_` + 24 random bytes = 48 hex characters (~192 bits of entropy). They are stored in plaintext in `gallery_tokens` — Supabase RLS and service-role-only write access are the security boundary. Clients can revoke instantly if compromised.
+Tokens are `pg_gallery_` + 24 random bytes = 48 hex characters (~192 bits of entropy). They are stored in plaintext in `gallery_tokens` — row-level security (RLS) and service-role-only write access are the security boundary. Clients can revoke instantly if compromised.
 
 | Operation | Who can do it |
 |---|---|

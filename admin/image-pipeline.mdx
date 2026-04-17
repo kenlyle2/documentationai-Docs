@@ -7,13 +7,13 @@ description: "How vault images are tagged by AI and scored for marketing quality
 
 ```mermaid
 flowchart TD
-    A[Image uploaded to Supabase Storage] --> B[user_images row inserted]
+    A[Image uploaded to storage] --> B[user_images row inserted]
     B --> C[tagImageAction fires]
     C --> D[Verify image URL is publicly accessible — 5 retries, 3s timeout]
-    D --> E[Gemini 1.5 Flash — base64 image + system prompt]
+    D --> E[Primary AI vision model — base64 image + system prompt]
     E --> F{Success?}
     F -- Yes --> G[tags + description returned]
-    F -- No --> H[GPT-4o-mini Vision fallback]
+    F -- No --> H[Fallback AI vision model]
     H --> G
     G --> I[Write to user_images.tags]
     I --> J[tg_user_images_search_tsv trigger fires]
@@ -34,7 +34,7 @@ If the user has defined business-specific terms in their profile, the tagger pre
 
 ## Quality Scoring
 
-A separate Gemini call scores each image on marketing quality (1–10 scale + PASS/REJECT). Stored as:
+A separate AI call scores each image on marketing quality (1–10 scale + PASS/REJECT). Stored as:
 - `quality_score` (smallint)
 - `quality_scanned_at` (timestamp)
 
@@ -57,4 +57,4 @@ A 300ms delay between images respects API rate limits. This also syncs every tag
 
 ## AI Re-tag (User-initiated)
 
-Users can re-tag any individual image from the image detail dialog in the vault. This re-runs the Gemini tagging call with a fresh prompt and overwrites the existing tags. Useful when auto-tags missed something obvious or when business terminology has been updated in the profile.
+Users can re-tag any individual image from the image detail dialog in the vault. This re-runs the AI tagging call with a fresh prompt and overwrites the existing tags. Useful when auto-tags missed something obvious or when business terminology has been updated in the profile.

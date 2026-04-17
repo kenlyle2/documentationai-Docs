@@ -9,7 +9,7 @@ The `/start` onboarding flow uses anonymous Supabase sessions. The user never cr
 
 <Steps>
   <Step title="Anonymous session created" icon="user" title-type="p">
-    On arrival at `/start`, Supabase creates an anonymous session automatically. All profile data, ideas, and generated images are stored against this anonymous `user_id`.
+    On arrival at `/start`, an anonymous session is created automatically. All profile data, ideas, and generated images are stored against this anonymous `user_id`.
   </Step>
   <Step title="User completes the flow" icon="wand-sparkles" title-type="p">
     Profile creation, enrichment, first post generation — all stored under the anon ID.
@@ -30,7 +30,7 @@ The `/start` onboarding flow uses anonymous Supabase sessions. The user never cr
 
 ## WordPress Session Bridge
 
-Three files in the Next.js app call the WordPress session endpoint after every Supabase sign-in, creating a seamless WP session in the background:
+Three files in the Next.js app call the WordPress session endpoint after every sign-in, creating a seamless WP session in the background:
 
 | File | Trigger |
 |---|---|

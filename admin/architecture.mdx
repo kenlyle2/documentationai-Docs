@@ -7,24 +7,24 @@ description: "Repositories, infrastructure, and the key technology choices behin
 
 | Repo | Purpose |
 |---|---|
-| `kenlyle2/postglider` | Main Next.js app, Supabase edge functions, migrations |
+| `kenlyle2/postglider` | Main Next.js app, edge functions, migrations |
 | `kenlyle2/pg-media-vault` | WordPress plugin adapter + gallery-search edge function source |
 | `kenlyle2/supawp-pg` | WordPress billing bridge plugin (fork of techcater/SupaWP) |
 
-All three repos share the same Supabase project (`postglider`, ref: `qzyvfuoyfrfosdtbczkc`). The WP repos are canonical sources for their plugins; deployed edge functions always live in the main Supabase project.
+All three repos share the same backend project. The WP repos are canonical sources for their plugins; deployed edge functions always live in the main project.
 
 ## Infrastructure
 
 | Layer | Technology |
 |---|---|
-| App hosting | Vercel — auto-deploys from `main` |
-| Database + auth | Supabase (Postgres + Supabase Auth) |
-| Edge functions | Supabase Edge Functions (Deno) |
-| Image generation | Ideogram v3 via FAL, OpenAI gpt-image-1, Replicate |
-| Image tagging | Gemini 1.5 Flash (primary), GPT-4o-mini Vision (fallback) |
-| Text generation | GPT-4o (Pilot Mode planning), GPT-4o-mini (text ideas, niche codes) |
-| Business enrichment | Outscraper |
-| Email | Loops.so |
+| App hosting | Managed hosting — auto-deploys from `main` |
+| Database + auth | Managed Postgres + auth service |
+| Edge functions | Deno-based edge runtime |
+| Image generation | Multiple AI image providers (standard + premium tiers) |
+| Image tagging | AI vision (primary + fallback) |
+| Text generation | Large language model (planning, ideas, niche codes) |
+| Business enrichment | Enrichment API |
+| Email | Transactional email service |
 | Social publishing | UploadPost |
 | WordPress search | SearchIQ |
 
@@ -35,10 +35,10 @@ All three repos share the same Supabase project (`postglider`, ref: `qzyvfuoyfrf
 | `NEXT_PUBLIC_SUPABASE_URL` | All clients |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + anon API calls |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side admin operations, edge functions |
-| `GEMINI_API_KEY` | Image tagging (primary) |
-| `OPENAI_API_KEY` | Image tagging (fallback), text generation |
-| `FAL_KEY` | Image generation (Ideogram v3, birefnet background removal) |
-| `REPLICATE_API_KEY` | Image generation (person reference / identity-locked) |
+| `GEMINI_API_KEY` | Image tagging (primary AI vision) |
+| `OPENAI_API_KEY` | Image tagging (fallback AI vision), text generation |
+| `FAL_KEY` | Image generation (standard + background removal) |
+| `REPLICATE_API_KEY` | Image generation (identity-locked renders) |
 | `OUTSCRAPER_API_KEY` | Business enrichment |
 | `WP_API_APP_PASSWORD` | WordPress multisite provisioning (super admin) |
 | `WP_API_BASE_URL` | `https://mypostglider.website` — multisite network root |
@@ -63,7 +63,7 @@ app/
 lib/
   actions/            ← Server Actions (galleryActions, etc.)
   machines/           ← XState v5 postgliderMachine (generate page state)
-  supabase/           ← client.ts, server.ts, middleware.ts
+  db/                 ← client.ts, server.ts, middleware.ts
 ```
 
 ## XState in the Generate Page
@@ -72,13 +72,13 @@ The `/generate` page is driven by a formal XState v5 state machine at `@/lib/mac
 
 State flow: `initializing → idle → generating_text → tinder_review → viewing_idea → planning_image → generating_image → selecting_variant → error`
 
-Supabase realtime listeners for image updates trigger XState events (`VARIANTS_ARRIVED`) rather than setting local booleans.
+Realtime listeners for image updates trigger XState events (`VARIANTS_ARRIVED`) rather than setting local booleans.
 
 ## Intelligence Pipeline
 
 | Signal | Source | Used by |
 |---|---|---|
-| Competitor signals | Predis.ai extractor → `competitor_signals` table | JIT nudges on Generate page |
+| Competitor signals | Competitor extractor → `competitor_signals` table | JIT nudges on Generate page |
 | Day signal | `day_signal` edge function (computed) | Genie, content balance |
 | Format signal | `format_signal` edge function (computed) | Genie suggestions |
 | Hashtag signal | `hashtag` edge function → `competitor_signals` | Genie hashtag recommendations |

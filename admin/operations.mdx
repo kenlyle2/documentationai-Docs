@@ -16,7 +16,7 @@ The admin panel at `/admin` provides UI wrappers for the most common operations.
 
 ## Common SQL Operations
 
-Run these in the **Supabase SQL Editor** (`qzyvfuoyfrfosdtbczkc`).
+Run these in the **SQL editor** (Supabase dashboard → SQL Editor).
 
 **Retag all images for a user:**
 ```
@@ -84,18 +84,18 @@ cd ~/projects/postglider2
 supabase db push
 ```
 
-**Deploy Next.js app:** Push to `main` — Vercel deploys automatically on every push to `main`.
+**Deploy Next.js app:** Push to `main` — the hosting platform deploys automatically on every push to `main`.
 
 ---
 
-## Supabase Admin API
+## Backend Admin API
 
 Operations requiring the service-role key:
 
 **Delete a test user (used by test scripts):**
 ```bash
 curl -X DELETE \
-  https://qzyvfuoyfrfosdtbczkc.supabase.co/auth/v1/admin/users/<uuid> \
+  ${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/admin/users/<uuid> \
   -H "apikey: SERVICE_ROLE_KEY" \
   -H "Authorization: Bearer SERVICE_ROLE_KEY"
 ```
@@ -138,9 +138,9 @@ Header: Authorization: Bearer SERVICE_ROLE_KEY
 | `NEXT_PUBLIC_SUPABASE_URL` | All clients |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + anon API calls |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side admin operations, edge functions |
-| `GEMINI_API_KEY` | Image tagging (primary) |
-| `OPENAI_API_KEY` | Image tagging (fallback), text generation |
-| `FAL_KEY` | Image generation (Ideogram v3, birefnet) |
+| `GEMINI_API_KEY` | Image tagging (primary AI vision) |
+| `OPENAI_API_KEY` | Image tagging (fallback AI vision), text generation |
+| `FAL_KEY` | Image generation (standard quality + background removal) |
 | `REPLICATE_API_KEY` | Image generation (person reference) |
 | `WP_API_APP_PASSWORD` | `apiguy` application password for subsite provisioning |
 | `WP_API_BASE_URL` | `https://mypostglider.website` |
