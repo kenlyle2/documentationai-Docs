@@ -1,17 +1,76 @@
 ---
-title: How do I create an account?
-description: Guide to account creation in PostGlider.
+title: "Account & Billing FAQ"
+description: "Common questions about PostGlider subscriptions, credits, billing management, and cancellation."
 ---
 
-## Quick Steps
+## Account
 
-1. Go to `https://app.postglider.com/signup`  
-2. Enter your email and choose a password
-3. Confirm your email via the verification link
-4. Log in at `https://app.postglider.com/login`
+<Expandable title="How do I create an account?">
+  PostGlider doesn't require signup upfront. Start the onboarding flow at `https://app.postglider.com/start`, complete your business profile and first post, then create your account when prompted. All your work is preserved.
 
-## Tip
+  If you prefer to start with an account, go to `https://app.postglider.com/signup`, enter your email and password, and you'll land directly on the Dashboard.
+</Expandable>
 
-<Callout kind="info">
-If you don't see the verification email, check your spam or junk folder.
-</Callout>
+<Expandable title="I didn't receive a verification email.">
+  Check your spam or junk folder. If it's not there after a few minutes, try signing in — PostGlider's onboarding flow doesn't require email confirmation before you can use the app.
+</Expandable>
+
+<Expandable title="Can I change my email address?">
+  Email changes are handled via Supabase authentication. Contact support@postglider.com and we'll update it for you.
+</Expandable>
+
+<Expandable title="I forgot my password.">
+  Go to the login page and click **Forgot password**. A magic link will be sent to your email address. Click it to set a new password.
+</Expandable>
+
+---
+
+## Credits
+
+<Expandable title="How do credits work?">
+  Credits are the currency for AI actions in PostGlider. Each generation action costs a set number of credits depending on the type. Your balance is shown on the Dashboard and resets monthly on your billing date.
+
+  | Action | Credit cost |
+  |---|---|
+  | Generate post ideas (Passenger Mode) | 3 credits |
+  | Generate post ideas (Pilot Mode) | 5 credits |
+  | AI Re-tag an image | 1 credit |
+  | Quality scan an image | 1 credit |
+  | Week Pack generation | 10 credits |
+</Expandable>
+
+<Expandable title="What happens when I run out of credits?">
+  Generation actions are blocked until your balance resets or you upgrade your plan. Your existing content, scheduled posts, and vault images are completely unaffected. Credits reset automatically on your monthly billing date.
+</Expandable>
+
+<Expandable title="Do unused credits roll over?">
+  No. Credits reset each billing cycle. If you regularly hit your limit, consider upgrading to a higher plan.
+</Expandable>
+
+---
+
+## Billing & Subscription
+
+<Expandable title="How do I view or change my subscription?">
+  Go to **My Account → Billing** in the app, then click **Manage Subscription**. This opens your WooCommerce billing page where you can upgrade, downgrade, or cancel.
+</Expandable>
+
+<Expandable title="When does an upgrade take effect?">
+  Upgrades take effect immediately. You'll have access to the higher credit limit and features right away.
+</Expandable>
+
+<Expandable title="When does a downgrade take effect?">
+  Downgrades apply at the start of your next billing cycle. You keep your current plan's features until then.
+</Expandable>
+
+<Expandable title="What payment methods are accepted?">
+  PostGlider uses Stripe via WooCommerce. All major credit and debit cards are accepted.
+</Expandable>
+
+<Expandable title="How do I cancel my subscription?">
+  Go to **My Account → Billing → Manage Subscription** and cancel from the billing page. Your access continues until the end of the current billing period. No data is deleted on cancellation.
+</Expandable>
+
+<Expandable title="I was charged but my credits didn't reset.">
+  Credits reset within a few minutes of your billing date. If they haven't updated after 15 minutes, contact support@postglider.com with your email address and we'll resolve it immediately.
+</Expandable>

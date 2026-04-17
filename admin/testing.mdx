@@ -1,0 +1,212 @@
+---
+title: "Automated Testing"
+description: "Full test suite documentation: all 7 scripts, accounts, what they test, and chain reasoning."
+---
+
+## Overview
+
+All test scripts live in `scripts/` and use `playwright-core` from project devDependencies — no global install needed. Every script requires the dev server running on `localhost:3000`.
+
+```bash
+# Start the dev server before running any script
+rundev
+```
+
+### Running the Suite
+
+```bash
+node scripts/run-all.cjs             # full suite — all 7 scripts in order
+node scripts/run-all.cjs onboard     # only the three /start onboarding flows
+node scripts/run-all.cjs app         # only the four authenticated-user tests
+```
+
+`run-all.cjs` runs scripts sequentially, streams each script's output live, and prints a grouped summary table with pass/fail and elapsed time at the end. Exit code is 1 if any script fails.
+
+---
+
+## Scripts
+
+| Script | Account | What it tests |
+|---|---|---|
+| `onboard-01-staytrue` | `test+staytruetattoopa@gmail.com` (fake) | `/start` flow — StayTrue Tattoo PA: enrichment, GMB check, business form, generate, claim |
+| `onboard-02-colono` | `test+colonoconstruccion@gmail.com` (fake) | Same flow + direct enrichment API call first; audits every field by name |
+| `onboard-03-roccos` | `test+roccospizza@gmail.com` (fake) | Same flow as colono — Rocco's Pizza Collegeville PA (restaurant type) |
+| `app-01-ux` | `kenlyle+2@gmail.com` (real, landscaper) | 23 functional assertions: login, sidebar, page nav, feature checks, overflow, sign out |
+| `app-02-usage` | `kenlyle+2@gmail.com` (real) | Broader authenticated flow: dashboard, generate, gallery, profiles, settings, billing |
+| `app-03-vault` | `kenlyle+2@gmail.com` (real, ~8 images) | 22 sub-tests across the full Vault UI: filters, hover actions, search, dialog, tools page |
+| `app-04-mobile` | `kenlyle+2@gmail.com` (real) | Screenshots only — no assertions; iPhone 390×844 of every main route |
+
+**Self-cleaning:** all three `onboard-*` scripts delete the test user from `auth.users` at the end of every run via the Supabase Admin API (try/finally, so cleanup runs even on failure). Requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`; skips gracefully if absent.
+
+---
+
+## Chain Reasoning — Why This Order
+
+**`onboard-01/02/03`** exercise the same `/start` funnel with three different business types (tattoo studio, construction, pizza/restaurant), giving breadth across enrichment categories. Fake accounts mean no leftover data accumulates; teardown ensures each run starts clean.
+
+**`app-01-ux` → `app-02-usage`** both run on `kenlyle+2@gmail.com`. `app-01-ux` is the tighter, faster regression check (23 named assertions); `app-02-usage` is broader and verifies the same surfaces more loosely. Together they are the "does the app basically work" check before going deeper.
+
+**`app-02-usage` → `app-03-vault`** is the natural handoff: `app-02-usage` confirms the gallery page loads; `app-03-vault` then goes 22 sub-tests deep into it. Same account, same ~8 images — run back-to-back for full gallery coverage.
+
+**`app-04-mobile`** sits at the end as a visual spot-check rather than a CI gate. Screenshots only, no pass/fail logic — use it to eyeball layout after a UI change.
+
+---
+
+## Script Details
+
+### onboard-01-staytrue
+
+**Screenshots:** `/tmp/pg-staytrue-shots/`
+**Test domain:** `staytruetattoopa.com`
+**Credentials:** `test+staytruetattoopa@gmail.com` / `TestPass123!`
+**Viewport:** 390×844 (iPhone 14 Pro)
+
+End-to-end onboarding flow. Walks the full `/start` funnel:
+
+1. Landing page → CTA click → anonymous session
+2. Domain entry → enrichment (up to 45s)
+3. GMB check — waits for "Generate My Post" button; logs whether business was found on Maps
+4. Business step — reports prefilled name, location, industry; clicks Continue
+5. Profile Builder — three cards (Next / Next / Continue) with Turnstile failsafe
+6. Photo Upload — skips if shown
+7. Generating — waits up to 60s for result, turnstile-block, or error
+8. If result: claim account → `/generate` post check
+
+**Pass/fail:** generation outcome is `turnstile-block` or `result` (both PASS in headless — Turnstile cannot solve headlessly); `error` is a FAIL.
+
+---
+
+### onboard-02-colono
+
+**Screenshots:** `/tmp/pg-colono-shots/`
+**Test URL:** `https://www.colonoconstruccion.com/`
+**Credentials:** `test+colonoconstruccion@gmail.com` / `TestPass123!`
+**Viewport:** 390×844 (iPhone 14 Pro)
+
+Extended onboarding test for a Spanish-language construction business. Same funnel as `onboard-01-staytrue` plus:
+
+- **Step 0 — Direct enrichment API call:** Before launching the browser, fires `business-enrichment` directly and prints every field with its value, clearly flagging missing ones.
+- **Step 5 — Full field audit:** Reports all five business form fields (name, location, industry, phone, website) individually with `⚠ empty` markers for anything unpopulated.
+
+Use this script when testing a new category of business (non-English sites, international addresses, GMB-sparse industries) to validate the enrichment + Outscraper merge.
+
+---
+
+### onboard-03-roccos
+
+**Screenshots:** `/tmp/pg-roccos-shots/`
+**Test URL:** `https://roccospizzacollegeville.com/`
+**Credentials:** `test+roccospizza@gmail.com` / `TestPass123!`
+**Viewport:** 390×844 (iPhone 14 Pro)
+
+Same structure as `onboard-02-colono`. Uses Rocco's Pizza in Collegeville PA — a restaurant/food-service business providing a different GMB category and enrichment profile than the tattoo studio and construction site. Theme prompt for `/generate` post check: `"weekend special happy hour deal"`.
+
+Alternating between StayTrue and Rocco's as the "quick" onboarding test prevents over-fitting to a single business type.
+
+---
+
+### app-01-ux
+
+**Screenshots:** `/tmp/pg-ux-shots/<test-name>-fail.png`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
+**Viewport:** 390×844 (iPhone 14 Pro); overflow suite uses 375×812
+
+The primary regression suite. Covers 23 tests across 7 suites:
+
+| Suite | What it checks |
+|---|---|
+| Auth / Login | Branding, forgot-password link, sign-up link |
+| Authenticated navigation | Login lands on dashboard |
+| Sidebar | Hamburger visible, opens with all nav items, closes off-screen |
+| Sidebar page links | Create Content, Media Vault, Business Profiles, My Vibe, My Account |
+| Feature checks | Gallery search, generate, settings save, billing plan, profiles button |
+| No horizontal overflow | Gallery, generate, settings, billing, login at 375 px |
+| Sign out | Redirects to /login |
+
+All 23 tests must pass before shipping. Failures produce screenshots in the output directory.
+
+---
+
+### app-02-usage
+
+**Screenshots:** `/tmp/pg-usage-shots/`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear` (landscaper account with existing data)
+
+Authenticated app flow tests. 20 named tests across core product surfaces:
+
+| Area | Tests |
+|---|---|
+| Dashboard | Heading and profile section load; profile card visible; "Generate post ideas" navigates to /generate |
+| Generate | Page load; button enabled (Turnstile bypassed on localhost); triggers generation; idea card visible; Add to Week Pack |
+| Gallery | Loads with filter tabs; My Uploads tab; AI Generated tab; search filters by tag |
+| Profiles | List loads with names; New profile button; new profile form fields |
+| Settings | Loads with save button; save shows confirmation |
+| Billing | Current plan and usage visible; credit/generation usage info |
+
+---
+
+### app-03-vault
+
+**Screenshots:** `/tmp/pg-vault-shots/<test-name>-fail.png`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
+
+Dedicated Media Vault regression suite. 22 sub-tests covering every vault feature:
+
+| # | Sub-test | What it verifies |
+|---|---|---|
+| 1 | page-load | Vault loads, core UI elements visible |
+| 2 | filter-chips | All / My Uploads / AI Generated / Archived tabs switch correctly |
+| 3 | image-grid | At least one image card visible |
+| 4 | hover-actions | Hovering a card exposes Archive + Delete buttons |
+| 5 | search-basic | Typing in the search box filters the grid |
+| 6 | smart-search-toggle | Brain icon toggles Smart Search mode |
+| 7 | profile-tabs | Profile name tabs appear above grid |
+| 8 | profile-media-slots | Profile tab reveals named image slots |
+| 9 | archive-toggle | Archiving an image moves it to Archived filter |
+| 10 | unarchive | Unarchiving restores image to All view |
+| 11 | image-detail-dialog | Clicking a card opens the detail dialog |
+| 12 | dialog-tags | Detail dialog shows tags section |
+| 13 | dialog-ai-retag | AI Re-tag button present in dialog |
+| 14 | dialog-quality-scan | Quality scan button present and responds |
+| 15 | dialog-archive-btn | Archive button visible in dialog image panel |
+| 16 | dialog-close | Dialog closes cleanly on X button |
+| 17 | upload-button | Upload label/input present |
+| 18 | gmb-import-btn | Import from Google button present |
+| 19 | tools-link | Tools button in header links to /tools |
+| 20 | tools-page | /tools loads with Vault Cleaner + Quality Scanning sections |
+| 21 | tools-target-input | Target number input present and editable |
+| 22 | quality-score-scan | Scan unscored button present in Tools |
+
+---
+
+### app-04-mobile
+
+**Screenshots:** `/tmp/pg-shots/<page-name>.png`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
+**Viewport:** 390×844 (iPhone 14 Pro, deviceScaleFactor 2)
+
+Visual reference tool — not an assertion suite. Logs in and takes a full-page screenshot of every main route: dashboard, generate, gallery, profiles, social-accounts, settings, billing. Use it to spot layout regressions or verify a UI change looks right on mobile before shipping.
+
+---
+
+## checkGeneratePosts (shared step)
+
+All three `onboard-*` scripts call `checkGeneratePosts` after a successful account claim, but only when onboarding produced a result and the claim form was completed. If onboarding was Turnstile-blocked (the most common headless outcome), there is no logged-in session and the step is skipped automatically.
+
+**What it does:**
+
+1. Navigates to `/generate`
+2. Verifies the page loaded — fails gracefully if redirected to `/login`
+3. Types a theme into the creative direction input if visible
+4. Clicks the Generate button
+5. Waits up to 60s for `Bank It / Approve / Reject` swipe buttons, `Caption` text, Turnstile block, or explicit error
+
+**Pass/fail logic:**
+
+| Outcome | Result |
+|---|---|
+| Idea cards visible (`Bank It`, `Approve`, `Reject`, `Caption`) | PASS |
+| Turnstile blocked (expected in headless) | PASS |
+| Generate button not found, page didn't load, or explicit error | FAIL |
+
+Screenshots are written with the `17-generate-*` prefix in each script's output directory.

@@ -1,0 +1,59 @@
+---
+title: "Auth & Credits"
+description: "Anonymous session onboarding, account claim flow, and the atomic credit deduction system."
+---
+
+## Auth Flow — Onboarding
+
+The `/start` onboarding flow uses anonymous Supabase sessions. The user never creates an account until the final step.
+
+<Steps>
+  <Step title="Anonymous session created" icon="user" title-type="p">
+    On arrival at `/start`, Supabase creates an anonymous session automatically. All profile data, ideas, and generated images are stored against this anonymous `user_id`.
+  </Step>
+  <Step title="User completes the flow" icon="wand-sparkles" title-type="p">
+    Profile creation, enrichment, first post generation — all stored under the anon ID.
+  </Step>
+  <Step title="Account claim — POST /api/auth/claim" icon="key" title-type="p">
+    When the user submits email + password, `supabaseAdmin.auth.admin.updateUserById` upgrades the anonymous session to a permanent account with `email_confirm: true`.
+
+    <Callout kind="info">
+      This uses the Admin API rather than the client-side `updateUser()` to avoid the "Confirm Change of Email from [blank]" error that occurs when upgrading an anonymous session client-side.
+    </Callout>
+
+    On success, the handler silently upserts a `gallery_tokens` row for the new account via `ignoreDuplicates: true`.
+  </Step>
+  <Step title="All data preserved" icon="check-circle" title-type="p">
+    Profile, ideas, and images all remain under the same `user_id`. The user lands on the Dashboard with their session, content, and vault intact.
+  </Step>
+</Steps>
+
+## WordPress Session Bridge
+
+Three files in the Next.js app call the WordPress session endpoint after every Supabase sign-in, creating a seamless WP session in the background:
+
+| File | Trigger |
+|---|---|
+| `components/login-form.tsx` | Password sign-in |
+| `app/auth/callback/page.tsx` | Magic link / OAuth callback |
+| `app/start/page.tsx` | Onboarding claim |
+
+See [Billing Bridge](/admin/billing-bridge) for the full endpoint details.
+
+## Credit System
+
+Credits are deducted atomically via the `deduct_credits_atomic` Postgres function (migration `20260413001000`). It uses `SELECT ... FOR UPDATE` to prevent race conditions — two simultaneous requests cannot both succeed if only one credit remains.
+
+```sql
+-- Signature
+deduct_credits_atomic(p_user_id uuid, p_amount int)
+  RETURNS json  -- { success: bool, balance: int, error: text }
+```
+
+API routes check `.success` and return HTTP 402 on insufficient balance.
+
+Admin accounts bypass the credit limit check (patched in migration `20260413006000`). The internal cap is 999,999 credits to prevent integer overflow.
+
+<Callout kind="info">
+  Credit limits per plan are configurable in `admin_settings` — no code change needed to adjust tier quotas.
+</Callout>

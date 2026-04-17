@@ -1,26 +1,81 @@
 ---
-title: Pages Aren't Saving
-description: Troubleshoot page saving issues in PostGlider.
+title: "Common Issues & Fixes"
+description: "Troubleshoot the most common PostGlider issues — settings not saving, images not loading, generation errors, and more."
 ---
 
-## Issue
+## Settings Not Saving
 
-- Edits to a doc page do not persist
-- No confirmation after clicking 'Save'
-
-## Steps to Fix
+**Symptom:** You click Save in Settings but changes don't persist after reload.
 
 <Steps>
-  <Step title="Check Connection">
-    ````bash
-    # Ensure you are online
-    ping app.postglider.com
-    ````
+  <Step title="Check your internet connection" icon="wifi" title-type="p">
+    Settings saves via a live API call. A dropped connection will silently fail. Refresh the page and try again.
   </Step>
-  <Step title="Refresh Session">
-    Log out, then log in again to refresh permissions.
+  <Step title="Look for an error toast" icon="alert-triangle" title-type="p">
+    A red toast should appear if the save failed. If you see "Session expired," sign out and back in, then retry.
   </Step>
-  <Step title="Contact Support">
-    If the problem remains, email support@postglider.com with details.
+  <Step title="Try a hard refresh" icon="refresh-cw" title-type="p">
+    Press `Ctrl+Shift+R` (Windows/Linux) or `Cmd+Shift+R` (Mac) to clear the page cache, then try saving again.
+  </Step>
+  <Step title="Contact support" icon="mail" title-type="p">
+    If the issue persists, email support@postglider.com with your account email and a description of which setting you're trying to save.
   </Step>
 </Steps>
+
+---
+
+## Images Not Loading in the Vault
+
+**Symptom:** Image cards appear blank or broken in the Media Vault.
+
+<Callout kind="info">
+  Images are served from Supabase Storage CDN. Occasional CDN propagation delays (under 30 seconds) can cause new uploads to appear blank briefly.
+</Callout>
+
+- Wait 30 seconds and refresh the page — most cases resolve on their own.
+- If only older images are broken, the CDN URL may have changed. Contact support.
+- If no images appear at all, check that you're on the correct business profile tab at the top of the Vault.
+
+---
+
+## Generation Not Starting
+
+**Symptom:** You click Generate and nothing happens, or the button is grayed out.
+
+- **Out of credits:** Your credit balance is shown on the Dashboard. If it's 0, generation is blocked until your billing cycle resets.
+- **Turnstile challenge:** PostGlider uses Cloudflare Turnstile to prevent abuse. If it can't verify you automatically, a brief challenge appears. Complete it and try again.
+- **No business profile selected:** Make sure you have at least one business profile set up under **My Vibe → Business Profiles**.
+
+---
+
+## WordPress Gallery Search Not Working
+
+**Symptom:** Searching on your WordPress site returns no results, or images are missing from search.
+
+- Verify your gallery token is still valid: **Settings → WordPress Integration** — look for the token status indicator.
+- New images need to be AI-tagged before they sync to WordPress. Untagged images won't appear in search.
+- Ask your admin to run a tag backlog sync to push all existing images to WordPress.
+- If the SearchIQ index hasn't been crawled recently, trigger a fresh crawl from the SearchIQ plugin settings in WordPress admin.
+
+---
+
+## Magic Link / Email Not Arriving
+
+**Symptom:** You requested a password reset or magic link but haven't received the email.
+
+1. Check your spam and junk folders.
+2. Wait up to 2 minutes — transactional email can be delayed.
+3. Make sure you're checking the correct email address associated with your PostGlider account.
+4. If still nothing, contact support@postglider.com. We can confirm your email address and resend manually.
+
+---
+
+## Still Stuck?
+
+Email **support@postglider.com** with:
+- Your account email
+- What you were trying to do
+- What happened instead
+- A screenshot if possible
+
+We aim to respond within 1 business day.

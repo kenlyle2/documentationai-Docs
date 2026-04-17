@@ -2,42 +2,26 @@
   "name": "PostGlider",
   "colors": {
     "light": {
-      "brand": "#FF0000",
-      "heading": "#000000",
-      "text": "#000000"
+      "brand": "#10b981",
+      "heading": "#111827",
+      "text": "#374151"
     },
     "dark": {
-      "brand": "#FB5151",
-      "heading": "#FFFFFF",
-      "text": "#FFFFFF"
+      "brand": "#34d399",
+      "heading": "#f9fafb",
+      "text": "#d1fae5"
     }
   },
   "navigation": {
     "tabs": [
       {
-        "tab": "Documentation",
-        "icon": "book",
+        "tab": "User Guide",
+        "icon": "book-open",
         "groups": [
           {
             "group": "Getting Started",
             "icon": "rocket",
             "pages": [
-              {
-                "title": "Getting Started ",
-                "path": "getting-started-/-onboarding"
-              },
-              {
-                "title": "Scheduling Posts",
-                "path": "scheduling-posts"
-              },
-              {
-                "title": "Creating a Post",
-                "path": "creating-a-post"
-              },
-              {
-                "title": "Account Setup",
-                "path": "account-setup"
-              },
               {
                 "title": "Introduction",
                 "path": "introduction",
@@ -47,40 +31,125 @@
                 "title": "Quickstart",
                 "path": "quickstart",
                 "icon": "zap"
+              },
+              {
+                "title": "Onboarding Flow",
+                "path": "getting-started-/-onboarding",
+                "icon": "play-circle"
+              },
+              {
+                "title": "Account Setup",
+                "path": "account-setup",
+                "icon": "user"
               }
             ]
           },
           {
-            "group": "Core Concepts",
-            "icon": "layers",
+            "group": "Content Studio",
+            "icon": "wand-sparkles",
             "pages": [
               {
-                "title": "Features",
-                "path": "features",
-                "icon": "file-text"
+                "title": "Creating Content",
+                "path": "creating-a-post",
+                "icon": "pen-line"
+              },
+              {
+                "title": "Week Packs & Scheduling",
+                "path": "scheduling-posts",
+                "icon": "calendar"
               }
             ]
           },
           {
-            "group": "Advanced",
-            "icon": "grid",
+            "group": "Media & Automation",
+            "icon": "image",
             "pages": [
+              {
+                "title": "Media Vault, Butler & Architect",
+                "path": "features",
+                "icon": "layers"
+              },
               {
                 "title": "Integrations",
                 "path": "integrations",
-                "icon": "package"
+                "icon": "plug"
               }
             ]
           }
         ]
       },
       {
-        "tab": "API Reference",
-        "icon": "code",
+        "tab": "Admin Reference",
+        "icon": "terminal",
         "groups": [
           {
-            "group": "Endpoints",
-            "openapi": "api-reference/openapi.yaml"
+            "group": "Architecture",
+            "icon": "server",
+            "pages": [
+              {
+                "title": "System Overview",
+                "path": "admin/architecture",
+                "icon": "layout-dashboard"
+              },
+              {
+                "title": "Auth & Credits",
+                "path": "admin/auth-and-credits",
+                "icon": "shield"
+              }
+            ]
+          },
+          {
+            "group": "WordPress Integration",
+            "icon": "globe",
+            "pages": [
+              {
+                "title": "Two-Site Architecture",
+                "path": "admin/wordpress-sites",
+                "icon": "layers"
+              },
+              {
+                "title": "SearchIQ & Image Sync",
+                "path": "admin/searchiq",
+                "icon": "search"
+              },
+              {
+                "title": "Billing Bridge (supawp-pg)",
+                "path": "admin/billing-bridge",
+                "icon": "credit-card"
+              }
+            ]
+          },
+          {
+            "group": "Image Pipeline",
+            "icon": "image",
+            "pages": [
+              {
+                "title": "Auto-Tagging & Quality Scoring",
+                "path": "admin/image-pipeline",
+                "icon": "tag"
+              }
+            ]
+          },
+          {
+            "group": "Operations",
+            "icon": "wrench",
+            "pages": [
+              {
+                "title": "Plugin Release Process",
+                "path": "admin/plugin-releases",
+                "icon": "package"
+              },
+              {
+                "title": "Common Admin Operations",
+                "path": "admin/operations",
+                "icon": "terminal"
+              },
+              {
+                "title": "Automated Testing",
+                "path": "admin/testing",
+                "icon": "check-square"
+              }
+            ]
           }
         ]
       },
@@ -99,7 +168,7 @@
             "expandable": false,
             "pages": [
               {
-                "title": "Account Setup",
+                "title": "Account & Billing",
                 "path": "help-center/faq/account-setup"
               }
             ]
@@ -110,19 +179,8 @@
             "expandable": false,
             "pages": [
               {
-                "title": "Page Not Saving",
+                "title": "Common Issues",
                 "path": "help-center/troubleshooting/page-not-saving"
-              }
-            ]
-          },
-          {
-            "group": "Guides",
-            "icon": "book-open",
-            "expandable": false,
-            "pages": [
-              {
-                "title": "Create Project",
-                "path": "help-center/guides/create-project"
               }
             ]
           }

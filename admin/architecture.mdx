@@ -1,0 +1,90 @@
+---
+title: "System Overview"
+description: "Repositories, infrastructure, and the key technology choices behind PostGlider."
+---
+
+## Repositories
+
+| Repo | Purpose |
+|---|---|
+| `kenlyle2/postglider` | Main Next.js app, Supabase edge functions, migrations |
+| `kenlyle2/pg-media-vault` | WordPress plugin adapter + gallery-search edge function source |
+| `kenlyle2/supawp-pg` | WordPress billing bridge plugin (fork of techcater/SupaWP) |
+
+All three repos share the same Supabase project (`postglider`, ref: `qzyvfuoyfrfosdtbczkc`). The WP repos are canonical sources for their plugins; deployed edge functions always live in the main Supabase project.
+
+## Infrastructure
+
+| Layer | Technology |
+|---|---|
+| App hosting | Vercel — auto-deploys from `main` |
+| Database + auth | Supabase (Postgres + Supabase Auth) |
+| Edge functions | Supabase Edge Functions (Deno) |
+| Image generation | Ideogram v3 via FAL, OpenAI gpt-image-1, Replicate |
+| Image tagging | Gemini 1.5 Flash (primary), GPT-4o-mini Vision (fallback) |
+| Text generation | GPT-4o (Pilot Mode planning), GPT-4o-mini (text ideas, niche codes) |
+| Business enrichment | Outscraper |
+| Email | Loops.so |
+| Social publishing | UploadPost |
+| WordPress search | SearchIQ |
+
+## Key Environment Variables
+
+| Variable | Used by |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | All clients |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + anon API calls |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side admin operations, edge functions |
+| `GEMINI_API_KEY` | Image tagging (primary) |
+| `OPENAI_API_KEY` | Image tagging (fallback), text generation |
+| `FAL_KEY` | Image generation (Ideogram v3, birefnet background removal) |
+| `REPLICATE_API_KEY` | Image generation (person reference / identity-locked) |
+| `OUTSCRAPER_API_KEY` | Business enrichment |
+| `WP_API_APP_PASSWORD` | WordPress multisite provisioning (super admin) |
+| `WP_API_BASE_URL` | `https://mypostglider.website` — multisite network root |
+
+## App Structure
+
+```
+app/
+  (app)/              ← authenticated pages (dashboard, generate, gallery, etc.)
+    generate/         ← Content Studio — XState machine drives all state
+    gallery/          ← Media Vault
+    packs/            ← Week Packs
+    settings/         ← Profile, competitors, WP token
+    billing/          ← Credits, subscription link
+    admin/            ← Admin panel (is_admin = true only)
+  api/                ← Next.js Route Handlers
+    auth/             ← claim, callback
+    admin/            ← tag-backlog, bulk operations
+    intelligence/     ← competitor signals, day/format/hashtag signals
+    places/           ← Google Places lookup
+  start/              ← /start onboarding (public, anonymous session)
+lib/
+  actions/            ← Server Actions (galleryActions, etc.)
+  machines/           ← XState v5 postgliderMachine (generate page state)
+  supabase/           ← client.ts, server.ts, middleware.ts
+```
+
+## XState in the Generate Page
+
+The `/generate` page is driven by a formal XState v5 state machine at `@/lib/machines/postgliderMachine.ts`. All logical switches — loading states, modal visibility, active stage — are driven by `state.matches('state_name')`, not local booleans.
+
+State flow: `initializing → idle → generating_text → tinder_review → viewing_idea → planning_image → generating_image → selecting_variant → error`
+
+Supabase realtime listeners for image updates trigger XState events (`VARIANTS_ARRIVED`) rather than setting local booleans.
+
+## Intelligence Pipeline
+
+| Signal | Source | Used by |
+|---|---|---|
+| Competitor signals | Predis.ai extractor → `competitor_signals` table | JIT nudges on Generate page |
+| Day signal | `day_signal` edge function (computed) | Genie, content balance |
+| Format signal | `format_signal` edge function (computed) | Genie suggestions |
+| Hashtag signal | `hashtag` edge function → `competitor_signals` | Genie hashtag recommendations |
+
+## Pilot Mode Drip Gate
+
+`pilot_eligible` on the `profiles` table is set to `true` by a daily pg_cron job (`pilot-mode-drip`, runs midnight UTC). Threshold is configurable in `admin_settings` under `feature_drip.pilot_mode_days` (default: 7 days).
+
+The column has `REVOKE UPDATE` from the `authenticated` role — users cannot self-elevate via the browser SDK. A backfill migration runs on deployment to immediately grant eligibility to accounts that already qualify.

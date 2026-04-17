@@ -1,0 +1,146 @@
+---
+title: "Operations"
+description: "Common admin SQL snippets, API endpoints, and operational procedures for running PostGlider."
+---
+
+## Admin Panel
+
+The admin panel at `/admin` provides UI wrappers for the most common operations. Access requires a service-role session.
+
+| Panel Section | What it does |
+|---|---|
+| **Bulk tag backlog** | Runs `tag-backlog` for a given user UUID — tags all untagged images and syncs them to WP |
+| **User lookup** | Find a user by email, view profile + credit balance |
+
+---
+
+## Common SQL Operations
+
+Run these in the **Supabase SQL Editor** (`qzyvfuoyfrfosdtbczkc`).
+
+**Retag all images for a user:**
+```
+POST /api/admin/tag-backlog
+Body: { "userId": "<uuid>", "batchSize": 50 }
+```
+
+**Check gallery token status:**
+```sql
+SELECT token, created_at, last_used_at
+FROM gallery_tokens
+WHERE user_id = '<uuid>';
+```
+
+**Manually grant pilot_eligible:**
+```sql
+UPDATE profiles SET pilot_eligible = true WHERE id = '<uuid>';
+```
+
+**Check search vector is populated:**
+```sql
+SELECT id, tags, search_tsv IS NOT NULL AS has_search_vector
+FROM user_images
+WHERE user_id = '<uuid>'
+LIMIT 10;
+```
+
+**Check credit balance:**
+```sql
+SELECT credits_remaining, plan_tier
+FROM profiles
+WHERE id = '<uuid>';
+```
+
+**Find a user by email:**
+```sql
+SELECT au.id, au.email, p.credits_remaining, p.plan_tier, p.pilot_eligible
+FROM auth.users au
+JOIN profiles p ON p.id = au.id
+WHERE au.email = 'user@example.com';
+```
+
+**Audit untagged images across all users:**
+```sql
+SELECT user_id, COUNT(*) AS untagged
+FROM user_images
+WHERE tags = '{}' OR tags IS NULL
+GROUP BY user_id
+ORDER BY untagged DESC;
+```
+
+---
+
+## Deployments
+
+**Deploy edge function:**
+```bash
+cd ~/projects/postglider2
+supabase functions deploy gallery-search
+```
+
+**Push migrations:**
+```bash
+cd ~/projects/postglider2
+supabase db push
+```
+
+**Deploy Next.js app:** Push to `main` — Vercel deploys automatically on every push to `main`.
+
+---
+
+## Supabase Admin API
+
+Operations requiring the service-role key:
+
+**Delete a test user (used by test scripts):**
+```bash
+curl -X DELETE \
+  https://qzyvfuoyfrfosdtbczkc.supabase.co/auth/v1/admin/users/<uuid> \
+  -H "apikey: SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer SERVICE_ROLE_KEY"
+```
+
+**Manually provision a gallery token:**
+```
+POST /api/admin/provision-token
+Body: { "userId": "<uuid>" }
+Header: Authorization: Bearer SERVICE_ROLE_KEY
+```
+
+---
+
+## Client Onboarding Checklist
+
+<Steps>
+  <Step title="Verify WP subsite is provisioned" icon="check" title-type="p">
+    PostGlider auto-provisions the WP subsite on the client's first image upload (`provisionWpSubsite()` fires). Check `profiles.wp_subsite_slug` is set.
+  </Step>
+  <Step title="Confirm gallery token exists" icon="key" title-type="p">
+    ```sql
+    SELECT token FROM gallery_tokens WHERE user_id = '<uuid>';
+    ```
+    If missing, run provision-token endpoint or trigger any image tag action — token is upserted on account claim.
+  </Step>
+  <Step title="Run tag backlog" icon="tag" title-type="p">
+    Use admin panel → Bulk tag backlog or POST to `/api/admin/tag-backlog`. This also syncs all images to the WP subsite.
+  </Step>
+  <Step title="Set up SearchIQ" icon="search" title-type="p">
+    Install SearchIQ plugin on the subsite, enter the API key, and trigger an index crawl. See [SearchIQ & Image Sync](/admin/searchiq) for full steps.
+  </Step>
+</Steps>
+
+---
+
+## Environment Variables Reference
+
+| Variable | Used by |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | All clients |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Browser + anon API calls |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-side admin operations, edge functions |
+| `GEMINI_API_KEY` | Image tagging (primary) |
+| `OPENAI_API_KEY` | Image tagging (fallback), text generation |
+| `FAL_KEY` | Image generation (Ideogram v3, birefnet) |
+| `REPLICATE_API_KEY` | Image generation (person reference) |
+| `WP_API_APP_PASSWORD` | `apiguy` application password for subsite provisioning |
+| `WP_API_BASE_URL` | `https://mypostglider.website` |

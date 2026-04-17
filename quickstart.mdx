@@ -1,162 +1,65 @@
 ---
-title: Getting Started with PostGlider
-description: |-
-  Quickstart Guide
-
-  Follow these steps to start using PostGlider:
-
-  1. Create an Account  
-  Go to the PostGlider website and sign up using your email and password.
-
-  2. Log In to Your Dashboard  
-  After signing up, log in to access your dashboard.
-
-  3. Connect Your Social Media Accounts  
-  Link your social media platforms so you can create and publish posts.
-
-  4. Create Your First Post  
-  Click on “Create Post”, write your content, and select your platform.
-
-  5. Schedule or Publish  
-  Choose to publish immediately or schedule your post for later.
-
-  You are now ready to start managing your social media with PostGlider.
+title: "Quickstart"
+description: "Go from zero to your first generated post in under 10 minutes."
 ---
-## Prerequisites
 
-<Callout kind="info" collapsed="false">
-  Ensure you have:
+## Before You Begin
 
-  - An email address for account registration
-
-  - Active social media accounts on Instagram, X (Twitter), Facebook, TikTok, or YouTube
-
-  - A local business profile ready to customize (business name, niche, target audience)
+<Callout kind="info">
+  You don't need an account to get started. PostGlider generates your first post before you sign up — your session, profile, and first idea are all saved when you claim your account at the end.
 </Callout>
 
-<Image src="https://images.unsplash.com/photo-1676276375914-cc102df16fa9?q=85&w=1100&h=450&fit=crop" width="1100" height="450" alt="Team reviewing social media content calendar on a whiteboard with platforms like Twitter, TikTok, Instagram, and Facebook." />
+All you need:
+- Your business website URL (or Google Business Profile name if you don't have a site)
+- A photo of your workspace or storefront (optional — PostGlider imports from Google if it finds you)
 
-## Create Your PostGlider Account
-
-Follow these steps to sign up and access your dashboard.
+## Get Your First Post
 
 <Steps>
-  <Step title="Visit the Signup Page" icon="external-link" title-type="p">
-    Navigate to [https://postglider.vercel.app/start](https://postglider.vercel.app/start) and click `Try Free` or `Sign Up`.
+  <Step title="Go to postglider.com and click Get Started" icon="external-link" title-type="p">
+    Navigate to the `/start` page. You'll see a single question: **"What should I post today?"**
   </Step>
 
-  <Step title="Enter Your Details" icon="user" title-type="p">
-    Provide your email, create a password, and enter your business name. Accept the terms and click `Create Account`.
+  <Step title="Enter your business website URL" icon="globe" title-type="p">
+    Type your URL and click **Import My Site**. PostGlider begins researching your business in the background — you don't wait for it to finish before moving on.
 
-    <Callout kind="tip" collapsed="false">
-      Use a business email for easier account recovery.
+    <Callout kind="tip">
+      Include the full URL with `https://`. If you don't have a website, enter your business name and city instead.
     </Callout>
   </Step>
 
-  <Step title="Verify Email" icon="mail" title-type="p">
-    Check your inbox for a verification email from PostGlider and click the link to activate your account.
+  <Step title="Confirm your Google Business Profile" icon="map-pin" title-type="p">
+    If PostGlider finds your Google listing, it shows a confirmation card with your business photo. Click **Yes, that's me** to import your GMB photos directly into your Media Vault — pre-tagged and quality-scored.
+
+    If you're not found on Google, you'll be prompted to upload a workspace photo instead.
+  </Step>
+
+  <Step title="Review your profile" icon="user" title-type="p">
+    PostGlider shows a pre-filled profile: business name, location, industry, services, and brand tone — all pulled from your website and Google listing. Confirm or adjust anything in about 90 seconds.
+  </Step>
+
+  <Step title="See your first post" icon="sparkles" title-type="p">
+    PostGlider generates a complete post: an AI-written concept and caption, plus a photorealistic image. You can regenerate as many times as you like before saving.
+  </Step>
+
+  <Step title="Claim your account" icon="check-circle" title-type="p">
+    Set an email and password. Your session, profile, and first post are all preserved. You land on the Dashboard, ready to generate more.
   </Step>
 </Steps>
 
-## Connect Social Media Accounts
+## What Happens Next
 
-PostGlider supports major platforms. Use the dashboard's `Connect Accounts` section to link them one by one.
+After your account is created, you're in the **Dashboard**. From here:
 
-<Tabs>
-  <Tab title="Instagram" icon="instagram">
-    Click `Connect Instagram`, log in to your Meta account, select your business profile, and authorize PostGlider.
-  </Tab>
-
-  <Tab title="X (Twitter)" icon="twitter">
-    Select `Connect X`, sign in with your X credentials, and grant permission for posting and scheduling.
-  </Tab>
-
-  <Tab title="Facebook" icon="facebook">
-    Go to `Connect Facebook`, log into Facebook Business Manager, and link your Page.
-  </Tab>
-
-  <Tab title="TikTok" icon="tiktok">
-    Choose `Connect TikTok`, authenticate your account, and enable content generation access.
-  </Tab>
-</Tabs>
-
-## Customize Your Profile
-
-Tailor PostGlider to your business for personalized post ideas.
-
-<Steps>
-  <Step title="Set Business Details" icon="settings" title-type="p">
-    In the dashboard, go to `Profile > Business Info`. Enter your niche (e.g., "coffee shop"), location, and target audience (e.g., "local families").
-  </Step>
-
-  <Step title="Choose Posting Preferences" icon="calendar" title-type="p">
-    Select preferred posting times, tone (e.g., "friendly and engaging"), and content themes (e.g., "promotions, behind-the-scenes").
-  </Step>
-
-  <Step title="Save Changes" icon="check-circle" title-type="p">
-    Review and save. PostGlider will generate a sample weekly calendar.
-  </Step>
-</Steps>
-
-## Generate and Schedule Your First Post
-
-Now create your first content idea.
-
-<Steps>
-  <Step title="Request Post Idea" icon="zap" title-type="p">
-    Click `Generate Daily Post` in the dashboard. PostGlider analyzes your profile and suggests a tailored idea.
-  </Step>
-
-  <Step title="Review and Edit" icon="edit" title-type="p">
-    View the caption, hashtags, and optimal timing. Edit as needed.
-
-    Here's an example generated post:
-
-    ```json
-    {
-      "platform": "Instagram",
-      "caption": "Freshly brewed coffee awaits ☕ What's your go-to order? Drop it in the comments! #LocalCoffee #MorningBrew",
-      "hashtags": ["CoffeeShop", "LocalBusiness", "GoodMorning"],
-      "optimalTime": "2024-10-15T08:00:00Z",
-      "imageSuggestion": "Cozy coffee cup steam rising"
-    }
-    ```
-  </Step>
-
-  <Step title="Schedule or Post Now" icon="schedule" title-type="p">
-    Click `Schedule` to add to your calendar or `Post Now` for immediate publishing.
-  </Step>
-</Steps>
-
-## Explore the Dashboard
-
-Navigate key sections to manage your content strategy.
-
-<Columns cols="3">
-  <Card title="Content Calendar" href="#content-calendar" icon="calendar" horizontal="false">
-    View upcoming posts, edit schedules, and track performance.
+<Columns cols={2}>
+  <Card title="Generate more content" icon="wand-sparkles" href="/creating-a-post">
+    Use the Content Studio to pick themes and generate a full batch of post ideas.
   </Card>
-
-  <Card title="Analytics" href="#analytics" icon="bar-chart-3" horizontal="false">
-    Monitor engagement metrics across all connected platforms.
-  </Card>
-
-  <Card title="Settings" href="#settings" icon="settings" horizontal="false">
-    Manage accounts, profile, and notification preferences.
+  <Card title="Build your first Week Pack" icon="calendar" href="/scheduling-posts">
+    Use the Weekly Architect to assemble a full 7-day calendar in seconds.
   </Card>
 </Columns>
 
-## Next Steps
-
-<Callout kind="tip" collapsed="false">
-  Dive deeper into advanced features like analytics and automation. Check out [Authentication](/authentication) for API access or the [Introduction](/introduction) for an overview.
+<Callout kind="tip">
+  **Pilot Mode** unlocks after 7 days on a Pro plan. It gives you full control over image generation — provider, quality tier, identity-locked renders, and style overrides. Worth the wait.
 </Callout>
-
-<Expandable title="Troubleshooting Common Issues" default-open="false">
-  - **Connection Failed**: Ensure your social account has business/creator mode enabled.
-
-  - **No Post Ideas**: Update your profile with more business details.
-
-  - **Scheduling Errors**: Verify posting permissions in connected accounts.
-</Expandable>
-

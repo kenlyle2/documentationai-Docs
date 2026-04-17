@@ -1,21 +1,102 @@
 ---
-title: Scheduling Posts
-description: |-
-
-  PostGlider allows you to schedule posts to be published at a later time.
+title: "Week Packs & Scheduling"
+description: "How Week Packs work, the Weekly Architect algorithm, and publishing through UploadPost."
 ---
-**Follow these steps:**
 
-**1. Log in to your dashboard &#x20;**
+## What Is a Week Pack?
 
-**2. Click on "Create Post" &#x20;**
+A Week Pack is a 7-slot content calendar for a single week. Each slot holds one approved idea — concept, caption, and final image. Once a pack is assembled and images are finalized, you publish directly to social platforms.
 
-**3. Write your content &#x20;**
+## Pack Lifecycle
 
-**4. Select your social media platform &#x20;**
+| Status | What it means |
+|---|---|
+| `building` | Ideas are being added; not all 7 slots filled |
+| `ready_for_upgrade` | All slots have draft images; you can upgrade to finals |
+| `upgrading` | Final image generation in progress |
+| `ready_to_export` | All images finalized; ready to schedule |
+| `exported` | Published to social platforms |
 
-**5. Choose a date and time for publishing &#x20;**
+## Weekly Architect
 
-**6. Click on "Schedule" to confirm &#x20;**
+The Architect assembles a full 7-day calendar from your backlog and vault in seconds. No AI call — it's a pure algorithm, which means it's instant.
 
-**Your post will be automatically published at the selected time.**
+<Steps>
+  <Step title="Scans your backlog" icon="list" title-type="p">
+    Looks at all saved ideas not yet in a pack. Filters out seasonally irrelevant content — an idea referencing Christmas gets skipped in April.
+  </Step>
+  <Step title="Scores vault images for freshness" icon="image" title-type="p">
+    Images used in recent packs get deprioritized so the same photo doesn't appear every week.
+  </Step>
+  <Step title="Checks content balance" icon="scale" title-type="p">
+    Ensures the week has a healthy mix across the three content types: **Promote** (offers, services), **Provide** (tips, education), and **Personalize** (team, community, behind-the-scenes).
+  </Step>
+  <Step title="Applies weather signals" icon="cloud" title-type="p">
+    For weather-sensitive industries (lawn care, landscaping, outdoor services), rain or storm forecasts trigger weather-prep ideas to be slotted on the right day.
+  </Step>
+  <Step title="Fills gaps" icon="plus-circle" title-type="p">
+    Any slot without a matching backlog idea gets a `gap_generate` marker. The Architect notes which slots need a new idea generated.
+  </Step>
+  <Step title="You review and assemble" icon="check-square" title-type="p">
+    You see the 7-day plan. Click **Assemble Pack** to create the Week Pack and promote all matched ideas to "approved" status.
+  </Step>
+</Steps>
+
+<Callout kind="info">
+  Weekly Architect is available on Pro Plus. It requires at least a few saved ideas in your backlog to work with — use the Content Studio to build that backlog first.
+</Callout>
+
+## Butler AI — Automatic Pairing
+
+Butler runs in the background and answers one question: *which vault images belong with which pending ideas?*
+
+It uses keyword and semantic overlap between your image tags and idea concepts. No extra AI call needed — images are already tagged. Butler generates **Golden Pairs** (idea + image) scored by confidence (0.0–1.0).
+
+The best pairs surface in the **Curation Drawer** on the generate page. Each pair shows:
+- A confidence score
+- A plain-English reasoning string: *"This outdoor tools photo directly matches the 'spring cleanup tips' concept."*
+
+One tap approves a pair — the idea is promoted to "approved" and slotted into your active Week Pack.
+
+<Callout kind="tip">
+  If Butler finds 6 or more matching pairs for a full 7-day week, it fires a **"Week Ready"** notification to alert you that a complete content calendar is ready to review.
+</Callout>
+
+**Availability:** Pro Plus, unlocks on the same drip schedule as Pilot Mode.
+
+## Actions on a Pack
+
+Once a pack is assembled, you manage it from the `/packs` page:
+
+- **View calendar** — 7-day grid with content category labels and cadence notes per day
+- **Draft images** — Generate quick draft images for any idea missing one (1 credit each)
+- **Upgrade to final** — Full Pilot Mode render for a single slot (8 credits)
+- **Reorder / delete** — Drag-and-drop slots
+- **Export** — Publish directly to social platforms via UploadPost
+
+## Publishing via UploadPost
+
+When a pack reaches `ready_to_export`, connect your social accounts via a one-click UploadPost authorization. Supported platforms:
+
+<Columns cols={3}>
+  <Card title="Instagram" icon="instagram" horizontal="false">
+    Feed posts and reels with auto-captions.
+  </Card>
+  <Card title="Facebook" icon="facebook" horizontal="false">
+    Pages and business profiles.
+  </Card>
+  <Card title="TikTok" icon="video" horizontal="false">
+    Short-form video captions.
+  </Card>
+  <Card title="YouTube" icon="youtube" horizontal="false">
+    Video description and title.
+  </Card>
+  <Card title="X (Twitter)" icon="twitter" horizontal="false">
+    Posts with image attachments.
+  </Card>
+  <Card title="LinkedIn" icon="linkedin" horizontal="false">
+    Professional updates and articles.
+  </Card>
+</Columns>
+
+Posts can be scheduled for a specific date and time or published immediately.

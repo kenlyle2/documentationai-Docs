@@ -1,0 +1,93 @@
+---
+title: "Billing Bridge (supawp-pg)"
+description: "How PostGlider users reach WooCommerce /my-account without a WordPress login screen."
+---
+
+## The Problem
+
+PostGlider users authenticate via Supabase — they have no WordPress session and cannot access `/my-account` on postglider.com directly. The billing bridge solves this transparently.
+
+## The Flow
+
+```
+app.postglider.com/billing
+  → user clicks "Manage Subscription"
+  → GET postglider.com/wp-json/supawp/v1/auth/session
+        ?token=<supabase-access-token>
+        &return_to=https://postglider.com/my-account
+  → endpoint validates JWT, finds WP user by email,
+    calls wp_set_auth_cookie(), redirects to return_to
+  → user lands on /my-account fully authenticated
+```
+
+From the user's perspective: one button click, then they're on their account page. No WordPress login screen ever appears.
+
+## Endpoint Reference
+
+**`GET /wp-json/supawp/v1/auth/session`**
+
+<ParamField query="token" type="string" required>
+  Supabase access token (JWT) from the user's active session.
+</ParamField>
+
+<ParamField query="return_to" type="string" required>
+  URL to redirect after the WP cookie is set. Must be on `postglider.com`.
+</ParamField>
+
+**Handler logic:**
+
+<Steps>
+  <Step title="Validate the JWT" icon="shield" title-type="p">
+    Calls `https://<supabase-project>.supabase.co/auth/v1/user` with `Authorization: Bearer <token>` and the stored `anon_key`.
+  </Step>
+  <Step title="Extract email and find the WP user" icon="user" title-type="p">
+    Extracts `email` from the JWT response. Calls `get_user_by('email', $email)` to find the matching WP account.
+
+    If no WP user is found, redirects to `/my-account` unauthenticated — WooCommerce handles the login prompt.
+  </Step>
+  <Step title="Set the WP auth cookie and redirect" icon="cookie" title-type="p">
+    Calls `wp_set_auth_cookie($user->ID, true)` then `wp_redirect(esc_url_raw($return_to))`.
+  </Step>
+</Steps>
+
+## supawp-pg Plugin
+
+**Repo:** `kenlyle2/supawp-pg` — fork of techcater's open-source SupaWP, modified for PostGlider. The techcater license updater is replaced with a GitHub-release auto-updater (same pattern as `pg-media-vault`).
+
+**Local path:** `~/projects/supawp`
+**Version scheme:** semantic version + lowercase letter suffix from `b` onward. Current: `1.12.0t`
+
+### Additional Capabilities
+
+| Endpoint / Feature | Purpose |
+|---|---|
+| `GET /wp-json/supawp/v1/auth/session` | Session bridge (described above) |
+| `POST /wp-json/supawp/v1/auth/auto-login` | JS background auto-login on WP page load |
+| `?supawp_launch_app=1` query param | Reverse direction: logged-in WP user → Supabase magic link → app |
+
+### Plugin Settings (`supawp_options`)
+
+| Key | Purpose |
+|---|---|
+| `supawp_supabase_url` | PostGlider Supabase project URL |
+| `supawp_service_role_key` | Used by `launch_app` to generate magic links |
+| `supawp_jwt_secret` | HS256 JWT validation (not required — plugin uses ES256/JWKS automatically) |
+| `supawp_app_callback_url` | `https://app.postglider.com/auth/callback` |
+
+### Deploying a New Version
+
+```bash
+cd ~/projects/supawp
+# make changes, bump version in init.php + metadata.json
+git add -A && git commit -m "feat(plugin): vX.Y.Za — description"
+git push
+git tag v1.12.0x && git push origin v1.12.0x
+```
+
+GitHub Actions builds `supawp.zip`. Download from the release and install via **WP Admin → Plugins → Add New → Upload** on postglider.com (standard zip upload works here — not a Hostinger site). Auto-updater polls `metadata.json` every 12 hours thereafter.
+
+## Prerequisites
+
+- `supawp-pg` must be installed and network-activated on **postglider.com** (the marketing/billing site)
+- The `postglider_anon_key` site option must be populated (set via `configure-site` API or wp-admin)
+- WordPress users on postglider.com are created automatically by WooCommerce at checkout — every paying subscriber has one

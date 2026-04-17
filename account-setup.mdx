@@ -1,15 +1,93 @@
 ---
-title: Account Setup
-description: 'Follow these steps to create and set up your PostGlider account:'
+title: "Account Setup"
+description: "Dashboard overview, billing, email lifecycle, and the WordPress gallery token."
 ---
-**1. Visit the PostGlider website &#x20;**
 
-**2. Sign Up &#x20;**
+## The Dashboard
 
-**3. Verify Your Email &#x20;**
+The Dashboard (`/dashboard`) is your home base after logging in. From here you can:
 
-**4. Log In &#x20;**
+- See all your business profiles and enrichment status
+- Navigate to the **Content Studio** to generate new ideas
+- Access your **Media Vault**
+- Manage **Week Packs**
+- View your credit balance and billing
+- Adjust settings: competitors, niche codes, publishing defaults
 
-**5. Access Your Dashboard &#x20;**
+## Business Profiles
 
-**Your account is now ready to use.**
+You can have multiple business profiles — useful for agencies managing several clients, or business owners with more than one location. Each profile has its own:
+- Enrichment data (name, location, industry, services)
+- Brand voice and tone settings
+- Media Vault images (assigned via profile tabs)
+- Niche codes (NAICS + SIC)
+
+Add a new profile from **Business Profiles → New Profile**.
+
+## Niche Classification
+
+PostGlider classifies each business profile to standardized **NAICS** (6-digit) and **SIC** (4-digit) codes using GPT-4o-mini. You can review and confirm your codes from **Settings**.
+
+Confirming your codes unlocks:
+- More precise competitor discovery
+- Deeper content strategy signals (day-of-week patterns, format efficiency, hashtag performance by niche)
+
+## Credit Costs {#credit-costs}
+
+| Action | Credits |
+|---|---|
+| Generate text ideas (per batch) | 1 |
+| Genie theme suggestions | 1 |
+| Quick Visual — Ideogram | 2 |
+| Draft image for pack (gpt-image-1 medium) | 1 |
+| Pilot Mode orchestration (GPT-4o planning) | 2 |
+| Final image / premium upgrade | 8 |
+| Onboarding image with person reference | 5 |
+| Onboarding workspace-only image | 3 |
+| Background removal | 1 |
+| Weekly Architect gap-fill | 8 |
+
+Credits reset monthly on your billing anniversary date. Free tier: 50/month. Pro Plus: 600/month.
+
+## Billing
+
+The **Billing** page (`/billing`) shows:
+- Current credit balance and daily/monthly usage meters
+- Your subscription tier
+- A **Manage Subscription** button
+
+Clicking **Manage Subscription** takes you directly to your WooCommerce account page on postglider.com — no separate WordPress login required. Plan changes, payment methods, and order history are all managed there.
+
+## Email Lifecycle
+
+PostGlider sends automated emails at key milestones:
+
+| Event | What you receive |
+|---|---|
+| Account created | Welcome email + tips sequence |
+| Enrichment complete | "Your profile is ready" notification |
+| First post generated | Activation sequence |
+| First Week Pack created | Engagement sequence |
+| Niche codes confirmed | "You're a niche expert" nurture email |
+| Subscription upgraded | Congratulations + advanced feature tips |
+| Subscription cancelled | Win-back sequence |
+
+## WordPress Gallery Token
+
+If you're connecting PostGlider to a WordPress site, every account has a gallery token generated automatically at signup. Find it at **Settings → WordPress Gallery Integration**.
+
+<Callout kind="alert">
+  Your full token is only shown once — when you first generate or regenerate it. Copy it immediately and store it somewhere safe. The masked display shown afterward cannot be used for configuration.
+</Callout>
+
+| Action | When to use |
+|---|---|
+| **Generate Token** | Reveal the full token for initial WordPress setup |
+| **Regenerate** | If a token was compromised or you're configuring a new WordPress site |
+| **Revoke** | If you're decommissioning your WordPress integration entirely |
+
+<Callout kind="warning">
+  Regenerating a token immediately breaks any WordPress site currently using the old one. Update your WordPress plugin settings with the new token before your site goes back to normal.
+</Callout>
+
+See [WordPress Gallery Integration](/integrations#wordpress) for the full setup guide.

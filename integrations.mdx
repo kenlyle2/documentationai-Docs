@@ -1,167 +1,114 @@
 ---
-title: Integrations with PostGlider
-description: Connect PostGlider to your favorite social platforms and third-party services to automate posting and streamline your workflow seamlessly.
+title: "Integrations"
+description: "Connect PostGlider to WordPress for AI-powered gallery search, UploadPost for social publishing, and Google Business Profile for photo import."
 ---
 
-## Overview
+## WordPress Gallery Integration {#wordpress}
 
-PostGlider integrates seamlessly with major social media platforms and third-party services. You can link your accounts to automate post publishing, receive tailored content suggestions, and set up webhooks for custom notifications.
+PostGlider can power AI-powered image search on your WordPress website. Visitors search your image gallery using natural language — "show me red dragons", "large back pieces", "US Navy tattoos" — and get instant results drawn from your PostGlider Media Vault.
 
-<Columns cols={3}>
-  <Card title="Social Platforms" icon="share-2" href="#social-integrations">
-    Connect Instagram, Facebook, Twitter, and TikTok directly.
-  </Card>
-  <Card title="Third-Party Apps" icon="plug" href="#third-party">
-    Integrate with Zapier, Slack, and more for extended automation.
-  </Card>
-  <Card title="Webhooks" icon="zap" href="#webhooks">
-    Receive real-time events via custom webhook endpoints.
-  </Card>
-</Columns>
+### How It Works
 
-<Callout kind="tip">
-  Start with social platform connections for immediate value, then expand to webhooks for advanced automation.
-</Callout>
+Every image in your vault is automatically tagged by AI with visual subjects, styles, colors, and service categories. The **PostGlider Adapter** WordPress plugin connects to those tags and makes them searchable via SearchIQ.
 
-## Social Media Integrations
+```mermaid
+flowchart LR
+    A[Visitor searches "outdoor patio"] --> B[WordPress + SearchIQ]
+    B --> C[PostGlider Adapter plugin]
+    C --> D[gallery-search edge function]
+    D --> E[user_images table — tags + search_tsv]
+    E --> F[Matching images returned]
+```
 
-Connect PostGlider to your social accounts to publish generated posts automatically.
+### Getting Your Token
 
-<Tabs>
-  <Tab title="Instagram & Facebook" icon="instagram">
-    ## Link Instagram and Facebook
-
-    Use Meta Business Suite for seamless integration.
-
-    <Steps>
-      <Step title="Create Meta App" icon="settings">
-        Go to [Meta for Developers](https://developers.facebook.com/) and create a new app.
-      </Step>
-      <Step title="Add Permissions" icon="shield">
-        Request `pages_manage_posts` and `instagram_basic` scopes.
-      </Step>
-      <Step title="Connect in Dashboard" icon="link">
-        In your PostGlider dashboard at `https://dashboard.postglider.com/integrations`, paste your app ID and secret.
-      </Step>
-    </Steps>
-
-    <ParamField header="Authorization" param-type="string" required="true">
-      Bearer token from Meta: `YOUR_META_TOKEN`.
-    </ParamField>
-  </Tab>
-
-  <Tab title="Twitter & TikTok" icon="twitter">
-    ## Setup Twitter (X) and TikTok
-
-    Authorize via OAuth for each platform.
-
-    <Steps>
-      <Step title="Twitter OAuth" icon="key">
-        Generate API keys at [developer.twitter.com](https://developer.twitter.com).
-      </Step>
-      <Step title="TikTok Developer" icon="video">
-        Register at [developers.tiktok.com](https://developers.tiktok.com) and get client credentials.
-      </Step>
-      <Step title="Authorize in PostGlider" icon="check-circle">
-        Visit `https://dashboard.postglider.com/integrations/twitter` and complete OAuth flow.
-      </Step>
-    </Steps>
-
-    ```javascript
-    // Example Twitter API call from PostGlider
-    const tweet = await fetch('https://api.twitter.com/2/tweets', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer YOUR_TWITTER_BEARER' },
-      body: JSON.stringify({ text: 'Daily post from PostGlider!' })
-    });
-    ```
-  </Tab>
-</Tabs>
-
-## Third-Party App Connections
-
-Extend PostGlider with popular automation tools.
-
-<Columns cols={2}>
-  <Card title="Zapier" icon="zap" href="https://zapier.com/apps/postglider/integrations" target="_blank">
-    Trigger Zaps on new post ideas. No code required.
-  </Card>
-  <Card title="Slack Notifications" icon="message-circle" href="#slack-setup">
-    Get post suggestions in your Slack channel.
-  </Card>
-</Columns>
-
-## Webhook Configuration
-
-Set up webhooks to receive events like `post_generated` or `post_published`.
-
-### Steps to Configure
+Every PostGlider account has a gallery token generated automatically at signup.
 
 <Steps>
-  <Step title="Generate Webhook URL" icon="link">
-    In dashboard: `https://dashboard.postglider.com/webhooks/new`.
+  <Step title="Go to Settings → WordPress Gallery Integration" icon="settings" title-type="p">
+    Your active token is shown in masked form with its creation date and last-used date.
   </Step>
-  <Step title="Subscribe to Events" icon="bell">
-    Select events and paste your endpoint URL.
-  </Step>
-  <Step title="Verify Signature" icon="shield">
-    Use HMAC SHA-256 with your webhook secret.
+  <Step title="Click Generate Token" icon="key" title-type="p">
+    The full token is displayed **once only**. Copy it immediately.
+
+    <Callout kind="alert">
+      The token is only shown in full at this moment. Once you navigate away, only the masked version is visible. Store it in your password manager or `.env` file immediately.
+    </Callout>
   </Step>
 </Steps>
 
-<CodeGroup tabs="Node.js,Python">
-  ```javascript
-  const crypto = require('crypto');
-  app.post('/webhook', (req, res) => {
-    const signature = req.headers['x-postglider-signature'];
-    const hash = crypto.createHmac('sha256', 'YOUR_WEBHOOK_SECRET')
-      .update(JSON.stringify(req.body))
-      .digest('hex');
-    if (signature === `sha256=${hash}`) {
-      console.log('Post generated:', req.body);
-      res.status(200).send('OK');
-    }
-  });
-  ```
-  ```python
-  import hmac
-  import hashlib
-  from flask import Flask, request
+### Installing the Plugin
 
-  app = Flask(__name__)
-  SECRET = 'YOUR_WEBHOOK_SECRET'
+<Steps>
+  <Step title="Download pg-install.php" icon="download" title-type="p">
+    Download the self-installing script from the [pg-media-vault GitHub release](https://github.com/kenlyle2/pg-media-vault).
+  </Step>
+  <Step title="Upload to WordPress root" icon="upload" title-type="p">
+    Place `pg-install.php` in the same folder as `wp-config.php` using your host's File Manager.
 
-  @app.route('/webhook', methods=['POST'])
-  def webhook():
-      signature = request.headers.get('X-Postglider-Signature')
-      body = request.get_data()
-      expected = hmac.new(
-          SECRET.encode(), body, hashlib.sha256
-      ).hexdigest()
-      if signature == f'sha256={expected}':
-          print('Post generated:', request.json)
-          return 'OK', 200
-  ```
-</CodeGroup>
+    <Callout kind="info">
+      This method is required for Hostinger sites — Hostinger's WordPress admin blocks standard zip uploads. The self-installer bypasses this.
+    </Callout>
+  </Step>
+  <Step title="Run the installer" icon="play" title-type="p">
+    Visit `https://yoursite.com/pg-install.php` in your browser. The script creates the plugin files and deletes itself.
+  </Step>
+  <Step title="Network Activate" icon="check-circle" title-type="p">
+    Go to **Network Admin → Plugins → Network Activate** the PostGlider Gallery Adapter. All future updates happen through the standard WordPress update mechanism.
+  </Step>
+  <Step title="Enter your credentials" icon="key" title-type="p">
+    Go to **WP Admin → Settings → PostGlider** on your subsite. Enter:
+    - Your Supabase project URL
+    - Your gallery token (copied from PostGlider Settings)
+  </Step>
+  <Step title="Configure SearchIQ" icon="search" title-type="p">
+    In SearchIQ settings, set the data source to:
+    `https://yoursite.mypostglider.website/wp-json/postglider/v1/search`
 
-<ParamField query="event" param-type="string" required="true">
-  Event types: `post_generated`, `post_published`, `error`.
-</ParamField>
+    Set the query parameter to `q`. Map fields: title, description, image, url.
+  </Step>
+</Steps>
 
-## Troubleshooting
+### Custom Subdomain Mapping
 
-<ExpandableGroup>
-  <Expandable title="Common Integration Errors" default-open="true">
-    - **401 Unauthorized**: Regenerate API tokens and ensure scopes match.
-    - **Webhook 4xx**: Check endpoint accessibility from `https://api.postglider.com`.
-    - **Rate Limits**: Space out posts; view limits in dashboard.
-  </Expandable>
+You can give a client their own branded gallery URL — like `portfolio.clientname.com` — while the site still runs on PostGlider's infrastructure.
 
-  <Expandable title="Test Integration">
-    Use PostGlider's test mode: Toggle in dashboard settings to simulate posts without publishing.
-  </Expandable>
-</ExpandableGroup>
+Your client adds one DNS record (a CNAME) at their domain registrar pointing the subdomain to your network address (`network.mypostglider.site`). WordPress Multisite handles the rest natively — no mapping plugins needed.
 
-<Callout kind="info">
-  For support, check status at `https://status.postglider.com` or contact via dashboard.
-</Callout>
+---
+
+## UploadPost — Social Publishing
+
+PostGlider connects to UploadPost for direct social publishing. Once a Week Pack reaches `ready_to_export`, authorize UploadPost with a single click and post to all connected platforms.
+
+Supported platforms: Instagram, Facebook, TikTok, YouTube, X (Twitter), LinkedIn.
+
+Posts can be scheduled for a specific date and time or published immediately.
+
+---
+
+## Google Business Profile
+
+Connect your GMB account from the **Media Vault** page to import your Google Business photos directly.
+
+<Steps>
+  <Step title="Click Import from Google in the vault header" icon="map-pin" title-type="p">
+    A one-time OAuth authorization opens in a popup.
+  </Step>
+  <Step title="Authorize PostGlider" icon="check-circle" title-type="p">
+    Grant read access to your GMB photos. PostGlider never writes to your Google account.
+  </Step>
+  <Step title="Photos import automatically" icon="download" title-type="p">
+    All photos are imported, quality-scored, and tagged. They appear in your vault under **My Uploads** within a few seconds.
+  </Step>
+</Steps>
+
+You can re-import at any time to pull in new photos added to your GMB listing.
+
+---
+
+## Loops.so — Email Automation
+
+PostGlider uses Loops.so to send lifecycle emails at key activation milestones. No configuration needed on your end — emails fire automatically when you reach each milestone.
+
+See the [Email Lifecycle section in Account Setup](/account-setup#email-lifecycle) for the full event list.

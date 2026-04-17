@@ -1,0 +1,111 @@
+---
+title: "Plugin Releases"
+description: "Release and deployment process for pg-media-vault and supawp-pg WordPress plugins."
+---
+
+## pg-media-vault
+
+**Repo:** `kenlyle2/pg-media-vault`
+**Installed on:** mypostglider.website (network-activated)
+**Local path:** `~/projects/pg-media-vault`
+
+### Repo Structure
+
+```
+pg-media-vault/
+  .github/workflows/release.yml   ← builds zip and creates GitHub release on tag push
+  plugins/
+    postglider-adapter/
+      includes/
+        auth.php                   ← multisite-aware option helpers (pg_get_option / pg_set_option)
+        search.php                 ← REST endpoint + Supabase proxy
+        admin-settings.php         ← per-subsite settings page (Settings → PostGlider)
+        network-api.php            ← POST /wp-json/postglider/v1/configure-site (super admin)
+        updater.php                ← polls metadata.json, surfaces WP update notices
+      postglider-adapter.php       ← plugin header + constants + require_once chain
+  supabase/functions/gallery-search/
+    index.ts                       ← edge function source (canonical copy; deploy from postglider2)
+  metadata.json                    ← single source of truth: version, download_url, changelog
+  pg-install.php                   ← one-time self-deleting installer (initial install only)
+```
+
+### Releasing a New Version
+
+```bash
+# 1. Make changes to files in plugins/postglider-adapter/
+
+# 2. Bump version in two places:
+#    - plugins/postglider-adapter/postglider-adapter.php (POSTGLIDER_ADAPTER_VERSION constant + header)
+#    - metadata.json (version, download_url pointing to new tag, changelog entry)
+
+# 3. Commit and push
+git add -A && git commit -m "feat(plugin): vX.Y.Z — description"
+git push
+
+# 4. Tag — GitHub Actions does the rest
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+GitHub Actions (`.github/workflows/release.yml`) runs in seconds: checks out the repo, zips `plugins/postglider-adapter/`, creates the GitHub release, attaches the zip as a release asset. No manual zip handling.
+
+WordPress sites check `metadata.json` every 12 hours. When `version` in `metadata.json` is higher than the installed version, a standard WP update notice appears in Network Admin → Plugins.
+
+### Initial Install (New Client Site)
+
+<Callout kind="warning">
+  Hostinger's WordPress upload handler rejects plugin zips via the WP admin UI. Use `pg-install.php` for initial installs only.
+</Callout>
+
+<Steps>
+  <Step title="Download pg-install.php" icon="download" title-type="p">
+    Get the raw file from the `kenlyle2/pg-media-vault` repo.
+  </Step>
+  <Step title="Upload to WordPress root" icon="upload" title-type="p">
+    Upload to the same folder as `wp-config.php` via Hostinger File Manager.
+  </Step>
+  <Step title="Run the installer" icon="play" title-type="p">
+    Visit `https://clientsite.mypostglider.website/pg-install.php`. The script creates the plugin files and self-deletes.
+  </Step>
+  <Step title="Network activate" icon="check-circle" title-type="p">
+    Network Admin → Plugins → Network Activate **PostGlider Gallery Adapter**.
+  </Step>
+</Steps>
+
+All subsequent updates go through the standard WordPress update mechanism — the broken upload UI is never needed again.
+
+<Callout kind="info">
+  The Hostinger App Passwords toggle must be ON. Hostinger disables Application Passwords by default. Enable it at: **Hostinger plugin → Tools → Application Passwords**.
+</Callout>
+
+---
+
+## supawp-pg
+
+**Repo:** `kenlyle2/supawp-pg` — fork of techcater's open-source SupaWP
+**Installed on:** postglider.com (standard single-site install)
+**Local path:** `~/projects/supawp`
+**Version scheme:** semantic version + lowercase letter suffix from `b` onward. Current: `1.12.0t`
+
+### Releasing a New Version
+
+```bash
+cd ~/projects/supawp
+# Make changes, bump version in init.php + metadata.json
+git add -A && git commit -m "feat(plugin): vX.Y.Za — description"
+git push
+git tag v1.12.0x && git push origin v1.12.0x
+```
+
+GitHub Actions builds `supawp.zip`. Download from the release and install via **WP Admin → Plugins → Add New → Upload** on postglider.com. Standard zip upload works here — postglider.com is not Hostinger. Auto-updater polls `metadata.json` every 12 hours thereafter.
+
+### Deploying the Edge Function
+
+The `gallery-search` edge function source lives in `pg-media-vault/supabase/functions/gallery-search/index.ts` but is deployed from the main repo:
+
+```bash
+cd ~/projects/postglider2
+supabase functions deploy gallery-search
+```
+
+After deploying, copy the updated `index.ts` back to `pg-media-vault/supabase/functions/gallery-search/` and commit both repos to keep them in sync.
