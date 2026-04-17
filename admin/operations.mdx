@@ -112,19 +112,19 @@ Header: Authorization: Bearer SERVICE_ROLE_KEY
 ## Client Onboarding Checklist
 
 <Steps>
-  <Step title="Verify WP subsite is provisioned" icon="check" title-type="p">
+  <Step title="Verify WP subsite is provisioned" icon="check">
     PostGlider auto-provisions the WP subsite on the client's first image upload (`provisionWpSubsite()` fires). Check `profiles.wp_subsite_slug` is set.
   </Step>
-  <Step title="Confirm gallery token exists" icon="key" title-type="p">
+  <Step title="Confirm gallery token exists" icon="key">
     ```sql
     SELECT token FROM gallery_tokens WHERE user_id = '<uuid>';
     ```
     If missing, run provision-token endpoint or trigger any image tag action — token is upserted on account claim.
   </Step>
-  <Step title="Run tag backlog" icon="tag" title-type="p">
+  <Step title="Run tag backlog" icon="tag">
     Use admin panel → Bulk tag backlog or POST to `/api/admin/tag-backlog`. This also syncs all images to the WP subsite.
   </Step>
-  <Step title="Set up SearchIQ" icon="search" title-type="p">
+  <Step title="Set up SearchIQ" icon="search">
     Install SearchIQ plugin on the subsite, enter the API key, and trigger an index crawl. See [SearchIQ & Image Sync](/admin/searchiq) for full steps.
   </Step>
 </Steps>

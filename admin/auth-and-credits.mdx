@@ -8,13 +8,13 @@ description: "Anonymous session onboarding, account claim flow, and the atomic c
 The `/start` onboarding flow uses anonymous Supabase sessions. The user never creates an account until the final step.
 
 <Steps>
-  <Step title="Anonymous session created" icon="user" title-type="p">
+  <Step title="Anonymous session created" icon="user">
     On arrival at `/start`, an anonymous session is created automatically. All profile data, ideas, and generated images are stored against this anonymous `user_id`.
   </Step>
-  <Step title="User completes the flow" icon="wand-sparkles" title-type="p">
+  <Step title="User completes the flow" icon="wand-sparkles">
     Profile creation, enrichment, first post generation — all stored under the anon ID.
   </Step>
-  <Step title="Account claim — POST /api/auth/claim" icon="key" title-type="p">
+  <Step title="Account claim — POST /api/auth/claim" icon="key">
     When the user submits email + password, `supabaseAdmin.auth.admin.updateUserById` upgrades the anonymous session to a permanent account with `email_confirm: true`.
 
     <Callout kind="info">
@@ -23,7 +23,7 @@ The `/start` onboarding flow uses anonymous Supabase sessions. The user never cr
 
     On success, the handler silently upserts a `gallery_tokens` row for the new account via `ignoreDuplicates: true`.
   </Step>
-  <Step title="All data preserved" icon="check-circle" title-type="p">
+  <Step title="All data preserved" icon="check-circle">
     Profile, ideas, and images all remain under the same `user_id`. The user lands on the Dashboard with their session, content, and vault intact.
   </Step>
 </Steps>

@@ -37,15 +37,15 @@ From the user's perspective: one button click, then they're on their account pag
 **Handler logic:**
 
 <Steps>
-  <Step title="Validate the JWT" icon="shield" title-type="p">
+  <Step title="Validate the JWT" icon="shield">
     Calls the auth service's user endpoint with `Authorization: Bearer <token>` and the stored `anon_key`.
   </Step>
-  <Step title="Extract email and find the WP user" icon="user" title-type="p">
+  <Step title="Extract email and find the WP user" icon="user">
     Extracts `email` from the JWT response. Calls `get_user_by('email', $email)` to find the matching WP account.
 
     If no WP user is found, redirects to `/my-account` unauthenticated — the billing system handles the login prompt.
   </Step>
-  <Step title="Set the WP auth cookie and redirect" icon="cookie" title-type="p">
+  <Step title="Set the WP auth cookie and redirect" icon="cookie">
     Calls `wp_set_auth_cookie($user->ID, true)` then `wp_redirect(esc_url_raw($return_to))`.
   </Step>
 </Steps>

@@ -25,13 +25,13 @@ flowchart LR
 Every PostGlider account has a gallery token generated automatically at signup.
 
 <Steps>
-  <Step title="Go to Settings → WordPress Gallery Integration" icon="settings" title-type="p">
+  <Step title="Go to Settings → WordPress Gallery Integration" icon="settings">
     Your active token is shown in masked form with its creation date and last-used date.
   </Step>
-  <Step title="Click Generate Token" icon="key" title-type="p">
+  <Step title="Click Generate Token" icon="key">
     The full token is displayed **once only**. Copy it immediately.
 
-    <Callout kind="alert">
+    <Callout kind="warning">
       The token is only shown in full at this moment. Once you navigate away, only the masked version is visible. Store it in your password manager or `.env` file immediately.
     </Callout>
   </Step>
@@ -40,28 +40,28 @@ Every PostGlider account has a gallery token generated automatically at signup.
 ### Installing the Plugin
 
 <Steps>
-  <Step title="Download pg-install.php" icon="download" title-type="p">
+  <Step title="Download pg-install.php" icon="download">
     Download the self-installing script from the [pg-media-vault GitHub release](https://github.com/kenlyle2/pg-media-vault).
   </Step>
-  <Step title="Upload to WordPress root" icon="upload" title-type="p">
+  <Step title="Upload to WordPress root" icon="upload">
     Place `pg-install.php` in the same folder as `wp-config.php` using your host's File Manager.
 
     <Callout kind="info">
       This method works on all WordPress hosts and bypasses any upload restrictions in the WordPress admin.
     </Callout>
   </Step>
-  <Step title="Run the installer" icon="play" title-type="p">
+  <Step title="Run the installer" icon="play">
     Visit `https://yoursite.com/pg-install.php` in your browser. The script creates the plugin files and deletes itself.
   </Step>
-  <Step title="Network Activate" icon="check-circle" title-type="p">
+  <Step title="Network Activate" icon="check-circle">
     Go to **Network Admin → Plugins → Network Activate** the PostGlider Gallery Adapter. All future updates happen through the standard WordPress update mechanism.
   </Step>
-  <Step title="Enter your credentials" icon="key" title-type="p">
+  <Step title="Enter your credentials" icon="key">
     Go to **WP Admin → Settings → PostGlider** on your subsite. Enter:
     - Your PostGlider service URL (provided by your admin)
     - Your gallery token (copied from PostGlider Settings)
   </Step>
-  <Step title="Configure SearchIQ" icon="search" title-type="p">
+  <Step title="Configure SearchIQ" icon="search">
     In SearchIQ settings, set the data source to:
     `https://yoursite.mypostglider.website/wp-json/postglider/v1/search`
 
@@ -92,13 +92,13 @@ Posts can be scheduled for a specific date and time or published immediately.
 Connect your GMB account from the **Media Vault** page to import your Google Business photos directly.
 
 <Steps>
-  <Step title="Click Import from Google in the vault header" icon="map-pin" title-type="p">
+  <Step title="Click Import from Google in the vault header" icon="map-pin">
     A one-time OAuth authorization opens in a popup.
   </Step>
-  <Step title="Authorize PostGlider" icon="check-circle" title-type="p">
+  <Step title="Authorize PostGlider" icon="check-circle">
     Grant read access to your GMB photos. PostGlider never writes to your Google account.
   </Step>
-  <Step title="Photos import automatically" icon="download" title-type="p">
+  <Step title="Photos import automatically" icon="download">
     All photos are imported, quality-scored, and tagged. They appear in your vault under **My Uploads** within a few seconds.
   </Step>
 </Steps>
