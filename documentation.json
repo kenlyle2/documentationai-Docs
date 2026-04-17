@@ -21,6 +21,7 @@
       {
         "tab": "User Guide",
         "icon": "book-open",
+        "public": true,
         "groups": [
           {
             "group": "Getting Started",
@@ -85,7 +86,7 @@
       {
         "tab": "Admin Reference",
         "icon": "terminal",
-        "protected": true,
+        "public": false,
         "groups": [
           {
             "group": "Architecture",
@@ -161,6 +162,7 @@
       {
         "tab": "Help Center",
         "icon": "help-circle",
+        "public": true,
         "pages": [
           {
             "title": "Help Center",
@@ -194,6 +196,7 @@
       {
         "tab": "Changelog",
         "icon": "clock",
+        "public": true,
         "pages": [
           {
             "title": "Release History",
