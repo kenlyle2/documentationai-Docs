@@ -117,7 +117,7 @@ When performing future audits:
 **Closed Issues:**
 
 | # | Issue | Fixed | Files changed |
-|---|---|---|---|
+|---|---|---|---|---|
 | 1 | FAL Webhook → Realtime Death Spiral | 2026-04-20 | `supabase/functions/fal-webhook/index.ts`, `hooks/useImageGeneration.ts` |
 | 2 | Trial pg_cron Silent Absence | 2026-04-20 | `hooks/useCurrentUser.ts` |
 | 3 | Playwright Zero Network Retry | 2026-04-20 | `scripts/_shared/resilient.cjs`, `app-02-usage`, `app-03-vault`, `social-01-fb-publish` |
@@ -125,3 +125,10 @@ When performing future audits:
 | 5 | WooCommerce Trial Injection Fire-and-Forget | 2026-04-20 | `supabase/functions/wpsubscription-webhook/index.ts`, migration for `trial_injected_at` |
 | 6 | Gallery Optimistic UI Without Error Recovery | 2026-04-20 | `app/(app)/gallery/page.tsx`, `components/gallery/ImageDetailsDialog.tsx` |
 | 7 | billing_events Permanent Failures Invisible | 2026-04-20 | `supabase/migrations/`, `supabase/functions/billing-recon/index.ts`, `wpsubscription-webhook/index.ts` |
+| 8 | Turnstile Bypass is a Side-Channel for Enumeration | 2026-04-21 | `supabase/functions/_shared/turnstile.ts` |
+| 9 | `usage_daily` / `usage_monthly` Race Condition on Simultaneous Generations | 2026-04-21 | `supabase/functions/generate-text/index.ts` |
+| 10 | Gallery `handleUpload` Has No Storage Cleanup on Partial Failures | 2026-04-21 | `app/(app)/gallery/page.tsx` |
+| 11 | `outscraper-worker` Webhook Secret is Checked After Body Parse | 2026-04-21 | `supabase/functions/outscraper-worker/index.ts` |
+| 12 | No Rate Limiting on `/api/social/*/post` Routes | 2026-04-21 | `app/api/social/facebook/post/route.ts`, `app/api/social/linkedin/post/route.ts`, `app/api/social/instagram/post/route.ts`, `supabase/migrations/20260421061400_social_rate_limit.sql` |
+| 13 | `generate-text` Edge Function Does Not Validate `count` Parameter | 2026-04-21 | `supabase/functions/generate-text/index.ts` |
+| 14 | Billing Events Table Has No Retention Policy | 2026-04-21 | `supabase/migrations/20260421061500_billing_retention.sql` |
