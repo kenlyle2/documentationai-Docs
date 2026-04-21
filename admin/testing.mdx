@@ -228,21 +228,70 @@ The following fixes were implemented during the Phase 2 Deep Audit (2026-04-20).
 
 **ROI:** Prevents "your app is broken, my images keep coming back" support tickets from users on slow networks.
 
-### 3. Billing Events — Failure Visibility + Reconciliation
+### 3. Billing Events — Failure Visibility + Reconciliation + Loops Alerts
 
 **The vulnerability:** When a webhook encountered a permanent failure, `billing_events` was left with `processed: false`. There was no query, dashboard, cron job, or alert surfacing these rows. A paying customer could be in limbo indefinitely.
 
 **The fix:**
 1. Migration added `processing_status` (enum: `pending`, `success`, `partial`, `failed`) and `retry_count` to `billing_events`.
 2. Updated `wpsubscription-webhook` to use `processing_status` instead of the boolean `processed` field.
-3. Created `supabase/functions/billing-recon/index.ts` — an Edge Function that queries for `failed` events older than 15 minutes and `pending` events older than 30 minutes, then logs a summary.
-4. Designed for pg_cron scheduling (every 15 minutes). Until scheduled, run manually:
+3. Created `supabase/functions/billing-recon/index.ts` — an Edge Function that queries for `failed` events older than 15 minutes and `pending` events older than 30 minutes, then sends a **Loops transactional email** to the admin inbox for each unalerted event.
+4. Added `alerted` and `loops_alerted_at` columns to `billing_events` for idempotency — each failure is emailed exactly once.
+
+**Loops transactional alert payload:**
+- `transactionalId`: Dedicated "Billing Failure" template (set `LOOPS_BILLING_ALERT_ID` in the edge function)
+- `email`: `kenlyle@gmail.com`
+- `dataVariables`:
+  - `userName`: Customer email (from webhook payload)
+  - `errorType`: `trial_injection_failed`, `profile_not_found`, `auth_creation_failed`, etc.
+  - `amount`: `N/A` (WooCommerce payload does not include amount)
+  - `recoveryLink`: Direct link to the Supabase dashboard editor filtered to the `billing_events` row
+  - `eventId`, `source`, `status`, `subscriptionId`, `retryCount`, `processedAt`
+
+**Immediate alert on Billing Injustice:**
+When `injectTrialIntoWpSubscription` fails (Fix #1), the webhook sends a Loops alert **immediately** before returning 500 to WooCommerce. This is a high-signal alert — the customer will be charged before their trial ends.
+
+**Idempotency:**
+- The `billing-recon` function only selects rows where `alerted = false`.
+- After a successful Loops POST, it updates the row with `alerted: true, loops_alerted_at: now()`.
+- If Loops returns non-2xx, the row remains unalerted and will be retried on the next recon run.
+
+**Setup:**
+1. Create a transactional email template in Loops.so called "Billing Failure".
+2. Copy the template ID into `supabase/functions/billing-recon/index.ts` (`LOOPS_BILLING_ALERT_ID`).
+3. Ensure `LOOPS_API_KEY` is set in Supabase Vault / Edge Function secrets.
+4. Schedule via pg_cron:
    ```bash
    curl -X POST https://<project>.supabase.co/functions/v1/billing-recon \
      -H "Authorization: Bearer <service_role>"
    ```
 
-**ROI:** Prevents "I paid but my account wasn't upgraded" support tickets that require manual database intervention.
+**Testing the Loops trigger with a mock failed webhook:**
+```bash
+# 1. Insert a mock failed billing event (no real WooCommerce webhook needed)
+curl -X POST "https://<project>.supabase.co/rest/v1/billing_events" \
+  -H "apikey: <anon_key>" \
+  -H "Authorization: Bearer <service_role>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source": "woocommerce",
+    "event_type": "woocommerce_active_test",
+    "external_id": "test-billing-alert-'"$(date +%s)"'",
+    "processing_status": "failed",
+    "processed_at": "'"$(date -u -d '20 minutes ago' +%Y-%m-%dT%H:%M:%SZ)"'",
+    "raw_payload": { "email": "test@example.com", "status": "active", "subscription_id": "12345" },
+    "processing_notes": { "error": "trial_injection_failed: Connection timeout" }
+  }'
+
+# 2. Run billing-recon
+ curl -X POST "https://<project>.supabase.co/functions/v1/billing-recon" \
+   -H "Authorization: Bearer <service_role>"
+
+# 3. Check your inbox for the Loops alert
+# 4. Verify the row has alerted=true and loops_alerted_at is set
+```
+
+**ROI:** Prevents "I paid but my account wasn't upgraded" support tickets that require manual database intervention. The admin receives a high-signal email with a direct recovery link within 15 minutes of any terminal billing failure.
 
 ---
 
