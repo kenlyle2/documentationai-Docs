@@ -1,0 +1,71 @@
+---
+title: "Billing Injustice: A Pre-Launch Operational Integrity Report"
+description: "Executive summary of the billing vulnerability discovered during pre-launch audit and the systems put in place to prevent it."
+---
+
+## The Problem We Almost Shipped
+
+During our pre-launch Phase 2 Deep Audit, we discovered a silent failure mode in our WooCommerce billing integration that we have codenamed **"Billing Injustice."**
+
+Here is the scenario:
+
+A small-business owner signs up for PostGlider and receives a 7-day reverse trial. On day 3, convinced by the product, they upgrade to a paid Pro subscription through our WooCommerce checkout. WooCommerce sends a webhook to our Supabase backend confirming the payment. Our system updates their profile to "Pro" and clears the trial flag.
+
+**But then — silently — a second API call fails.**
+
+We push the remaining trial days into WooCommerce so that billing does not begin until day 8. If that API call fails (network timeout, credentials rotated, WordPress plugin offline), our webhook handler was swallowing the error and returning "success" to WooCommerce anyway. WooCommerce begins charging the customer immediately — on day 3, not day 8.
+
+The customer does not know why. They did nothing wrong. They simply trusted our checkout flow.
+
+## Why This Matters
+
+**Trust erosion:** A customer who is overcharged before their trial ends does not write a polite ticket. They dispute the charge, leave a one-star review, and tell other business owners not to trust us.
+
+**Support burden:** Every Billing Injustice requires manual investigation, a refund, and an apology. At scale, this consumes hours per incident.
+
+**Revenue leakage:** The refund is the visible cost. The invisible cost is churn — a customer who feels cheated never returns, even after we fix the bug.
+
+**Regulatory exposure:** In jurisdictions with strong consumer protection (EU, California), charging before an agreed trial ends is not a bug — it is a compliance violation.
+
+## What We Built
+
+We did not simply patch the API call. We rebuilt the surrounding operational infrastructure so that this class of failure can never go unnoticed again.
+
+### 1. Hard Dependency on Trial Injection
+
+The WooCommerce webhook now **fails hard** if the trial injection does not succeed. Instead of returning HTTP 200 to WooCommerce, it returns HTTP 500. WooCommerce retries automatically. The customer's billing clock does not start until we prove — via a successful API response — that the trial window was respected.
+
+### 2. Audit Trail
+
+We added a `trial_injected_at` timestamp to every profile. It is only set when the WooCommerce API confirms success. If this field is NULL, we know the customer is at risk.
+
+### 3. Real-Time Alerts via Loops
+
+When a trial injection fails, our system immediately sends a **transactional email alert** to the admin inbox (not a newsletter, not a digest — a single, high-signal email per incident). The email contains:
+
+- The customer's email address
+- The exact error type
+- A direct recovery link to the Supabase dashboard
+- The WooCommerce subscription ID
+
+This alert arrives within seconds of the failure, not after a customer complaint.
+
+### 4. Background Reconciliation
+
+A scheduled edge function (`billing-recon`) scans for any billing events that remain in a failed state for more than 15 minutes. If an alert was somehow missed, it sends a follow-up. Each event is marked `alerted = true` after the first successful email, ensuring no duplicates.
+
+## The Net Result
+
+Before: A customer could be overcharged silently. We would find out only when they complained.
+
+After: The failure is caught, retried, and escalated to a human within seconds. The audit trail proves we honored the trial. The alert ensures we never need a customer to report the problem first.
+
+## What This Costs
+
+The engineering effort was approximately one day. The ongoing operational cost is a single email per rare failure.
+
+The cost of **not** building this: refund processing, chargeback fees, negative reviews, and the slow erosion of the trust we are asking small-business owners to place in us.
+
+## For Leadership
+
+This is not a technical footnote. It is an example of the operational maturity required to handle other people's money. We identified the gap proactively, fixed it before launch, and built monitoring that ensures we will never ship a Billing Injustice again.

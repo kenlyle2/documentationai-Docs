@@ -156,6 +156,11 @@
                 "icon": "check-square"
               },
               {
+                "title": "Billing Injustice Report",
+                "path": "admin/billing-injustice",
+                "icon": "alert-triangle"
+              },
+              {
                 "title": "Security & Infrastructure Backlog",
                 "path": "admin/backlog",
                 "icon": "shield-alert"
