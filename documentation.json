@@ -164,6 +164,11 @@
                 "title": "Security & Infrastructure Backlog",
                 "path": "admin/backlog",
                 "icon": "shield-alert"
+              },
+              {
+                "title": "Global Verify Audit — Phase 3",
+                "path": "admin/audit-phase3",
+                "icon": "scan"
               }
             ]
           }

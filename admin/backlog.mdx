@@ -133,3 +133,44 @@ When performing future audits:
 | 12 | No Rate Limiting on `/api/social/*/post` Routes | 2026-04-21 | `app/api/social/facebook/post/route.ts`, `app/api/social/linkedin/post/route.ts`, `app/api/social/instagram/post/route.ts`, `supabase/migrations/20260421061400_social_rate_limit.sql` |
 | 13 | `generate-text` Edge Function Does Not Validate `count` Parameter | 2026-04-21 | `supabase/functions/generate-text/index.ts` |
 | 14 | Billing Events Table Has No Retention Policy | 2026-04-21 | `supabase/migrations/20260421061500_billing_retention.sql` |
+
+---
+
+## Phase 3 Global Verify Findings (2026-04-21)
+
+Discovered during holistic conflict detection between Credit Idempotency, WPSubscription Webhook, and Loops.so Recon Agent.
+
+### Critical Path Conflicts (Fix Immediately)
+
+| # | Issue | File | Risk | ROI |
+|---|---|---|---|---|
+| 15 | execute-image idempotency check is NOT atomic — two requests can both pass the guard and deduct credits | `supabase/functions/execute-image/index.ts:44-80` | Double credit deduction on rapid clicks | Prevents "you charged me twice" tickets that `alreadyProcessing` flag was supposed to eliminate |
+| 16 | billing-recon can send duplicate Loops emails if DB update fails after Loops success | `supabase/functions/billing-recon/index.ts:107-127` | Email storm during network instability | Prevents inbox flooding and Loops API overage charges |
+| 17 | Gallery upload cleanup can fail silently — `.catch(() => {})` swallows storage removal errors | `app/(app)/gallery/page.tsx:369` | Orphaned files accumulate in storage bucket | Prevents storage bloat from failed uploads |
+
+### Deep State Audit Findings (Schedule Next Sprint)
+
+| # | Issue | File | Risk | ROI |
+|---|---|---|---|---|
+| 18 | `imageGeneratingIds` cleared on timeout allows duplicate generation before webhook arrives | `hooks/useImageGeneration.ts:54-80` | User clicks "Generate Again" at 102s, triggering duplicate | Prevents double generation charges after timeout |
+| 19 | `wp-subscription-webhook` does not validate `subscription_id` type before string operations | `supabase/functions/wpsubscription-webhook/index.ts:293-300` | `null` subscription_id causes injection failure | Defense in depth against WooCommerce payload variations |
+| 20 | `billing-recon` Loops alert has no retry on transient failure | `supabase/functions/billing-recon/index.ts:22-48` | Alerts lost during Loops outages | Ensures billing failures are never silently missed |
+| 21 | Social post routes have 120 lines of duplicated `checkRateLimit` / `markPublished` code | `app/api/social/*/post/route.ts` | Maintenance burden, inconsistent limits | Reduces tech debt and risk of divergent rate limits |
+| 22 | `generate-text` 60-second guard is per-user, not per-profile | `supabase/functions/generate-text/index.ts:93-103` | Cannot generate for different businesses within 60s | Removes UX friction for multi-business users |
+| 23 | `fal-webhook` JWT has no `iat`/`exp` check | `supabase/functions/fal-webhook/index.ts` | Replay attack on old JWTs | Defense in depth for webhook security |
+| 24 | `outscraper-worker` has no max payload size guard | `supabase/functions/outscraper-worker/index.ts:469` | Memory exhaustion from oversized payloads | Prevents DoS from malformed webhook requests |
+
+### Full Backlog (Issues 25–34)
+
+| # | Issue | File | Risk | ROI |
+|---|---|---|---|---|
+| 25 | Social connections GET returns expired tokens as "connected" | `app/api/social/connections/route.ts:19` | Users see "connected" but posts fail | Prevents "my posts stopped working" confusion |
+| 26 | `secureCompare` nonce generation is dead code | `supabase/functions/wpsubscription-webhook/index.ts:222` | Unused complexity increases audit surface | Cleaner codebase, easier security review |
+| 27 | Gallery auto-tag failures silently swallowed | `app/(app)/gallery/page.tsx:361` | Images uploaded without tags | Prevents "my images have no tags" tickets |
+| 28 | `generate-text` batch loop has no upper bound defense | `supabase/functions/generate-text/index.ts:267` | Unbounded loop if count cap is removed | Defense in depth |
+| 29 | Channel subscription errors show generic toast regardless of cause | `hooks/useImageGeneration.ts:210` | Users cannot distinguish timeout from auth error | Better error messages reduce support tickets |
+| 30 | WordPress sync failures are invisible | `lib/actions/galleryActions.ts:158` | Images don't appear on customer's website | Prevents "my images aren't on my site" tickets |
+| 31 | Parallel image generation trusts `imageCount` from execution plan | `supabase/functions/execute-image/index.ts:233` | Tampered plan could create undefined promises | Input validation gap |
+| 32 | Facebook post success doesn't return `pageId` used | `app/api/social/facebook/post/route.ts:107` | Cannot verify which page was posted to | Debugging friction for multi-page users |
+| 33 | `recoveryLink` in billing-recon hardcodes Supabase URL | `supabase/functions/billing-recon/index.ts:105` | Link wrong if project moves regions | Operational friction during incidents |
+| 34 | LinkedIn `postId` extraction not validated | `app/api/social/linkedin/post/route.ts:161` | Header name change causes silent null | Silent data loss in post history |

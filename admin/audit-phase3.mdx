@@ -1,0 +1,254 @@
+---
+title: "Global Verify Audit — Phase 3"
+description: "Holistic conflict detection and vulnerability extraction across billing, credits, webhooks, and edge functions."
+---
+
+## Audit Date
+2026-04-21
+
+---
+
+## CRITICAL PATH CONFLICTS (Fix Immediately)
+
+### Conflict 1: execute-image Idempotency Check is NOT Atomic
+
+**Files:** `supabase/functions/execute-image/index.ts:44-80`
+
+**The Race:**
+1. Request A reads `idea.image_orchestration.status` → sees `null`
+2. Request B reads `idea.image_orchestration.status` → sees `null` (same millisecond)
+3. Request A passes the guard, deducts credits via RPC
+4. Request B passes the guard, deducts credits via RPC
+5. Request A updates status to `processing`
+6. Request B overwrites status to `processing`
+
+**Result:** Double credit deduction. The `deduct_credits_atomic` RPC is atomic in isolation, but the guard before it has no row lock.
+
+**Why this matters:** The `alreadyProcessing` flag in `imageActions.ts:58` and the frontend skip logic in `generate/page.tsx:899,948` only protect the UI. They do NOT protect the edge function from concurrent requests. A user who double-clicks "Save" or refreshes and clicks again within 50ms pays twice.
+
+**Fix:**
+```typescript
+// BEFORE (vulnerable):
+const currentOrchestration = idea.image_orchestration as any;
+if (currentOrchestration?.status === 'processing' || currentOrchestration?.status === 'pending') {
+  return jsonResponse({ success: true, alreadyProcessing: true });
+}
+// ... deduct credits ...
+await adminClient.from("generated_ideas").update({ image_orchestration: { status: "processing" }});
+
+// AFTER (safe):
+// Step 1: Set status to 'pending' FIRST. If this fails (conflict), another request won.
+const { data: updatedIdea, error: updateError } = await adminClient
+  .from("generated_ideas")
+  .update({
+    image_orchestration: {
+      ...(idea.image_orchestration ?? {}),
+      status: "processing",
+      step: "image",
+      started_at: new Date().toISOString(),
+    },
+  })
+  .eq("id", idea_id)
+  .eq("user_id", user.id)
+  .select("image_orchestration")
+  .single();
+
+if (updateError || !updatedIdea) {
+  return jsonResponse({ success: true, alreadyProcessing: true, message: "Another request is already processing this idea" });
+}
+
+// Step 2: NOW deduct credits. We hold the "processing" lock.
+```
+
+**ROI:** Prevents the "you charged me twice" support ticket that our `alreadyProcessing` flag was supposed to eliminate but doesn't actually protect against.
+
+---
+
+### Conflict 2: billing-recon Can Send Duplicate Loops Emails
+
+**Files:** `supabase/functions/billing-recon/index.ts:107-127`
+
+**The Race:**
+1. `loopsSendTransactional` returns `true` (Loops API responded HTTP 200)
+2. `await adminClient.from("billing_events").update({ alerted: true })` fails (network timeout, connection reset, DB under load)
+3. Row remains `alerted: false`
+4. Next recon run (15 minutes later) selects the same row
+5. Duplicate email sent
+
+**Result:** Email storm if Supabase connection is flaky while Loops is healthy.
+
+**Fix:** Swap the order. Mark `alerted: true` FIRST in a "optimistic lock" pattern, then send the email. If the email fails, log it for manual review but don't retry automatically.
+
+```typescript
+// BEFORE:
+const sent = await loopsSendTransactional(...);
+if (sent) {
+  await adminClient.from("billing_events").update({ alerted: true }); // Can fail after email sent
+}
+
+// AFTER:
+const { error: lockError } = await adminClient
+  .from("billing_events")
+  .update({ alerted: true, loops_alerted_at: new Date().toISOString() })
+  .eq("id", event.id)
+  .eq("alerted", false); // Optimistic lock: only update if still unalerted
+
+if (lockError) {
+  console.log(`[billing-recon] Event ${event.id} was already alerted by another process`);
+  continue;
+}
+
+// Now send email. If it fails, the row is already marked alerted=true,
+// so no duplicate. But we log the failure.
+const sent = await loopsSendTransactional(...);
+if (!sent) {
+  console.error(`[billing-recon] Loops alert failed for ${event.id} — event was marked alerted but email did not send`);
+}
+```
+
+**ROI:** Prevents inbox flooding and Loops API overage charges during network instability.
+
+---
+
+### Conflict 3: Gallery `handleUpload` Cleanup Can Fail Silently
+
+**Files:** `app/(app)/gallery/page.tsx:369`
+
+The catch block attempts storage cleanup:
+```typescript
+if (uploadedFilePath) {
+  await supabase.storage.from('user-gallery-images').remove([uploadedFilePath]).catch(() => {});
+}
+```
+
+If the storage removal fails (bucket permissions, network), the `.catch(() => {})` swallows it. The orphaned file remains. There is no retry, no log, no user notification.
+
+**Fix:** At minimum, log the failure. Better: queue for background cleanup.
+
+```typescript
+if (uploadedFilePath) {
+  const { error: removeErr } = await supabase.storage
+    .from('user-gallery-images')
+    .remove([uploadedFilePath]);
+  if (removeErr) {
+    console.error(`[gallery] Failed to clean up orphaned upload: ${uploadedFilePath}`, removeErr);
+    // Optionally: insert into an orphaned_files queue table for batch cleanup
+  }
+}
+```
+
+**ROI:** Prevents storage bucket bloat from accumulated failed uploads.
+
+---
+
+## Deep State Audit — Non-Critical Findings
+
+### Finding 4: `imageGeneratingIds` Set Cleared Prematurely on Timeout
+
+**Files:** `hooks/useImageGeneration.ts:54-80`
+
+When the 100-second timeout fires, `imageGeneratingIds` is cleared. But if the webhook arrives at 105 seconds, the `orchestrationCompleted` detection (line 131-137) will clear it again (idempotent). However, the user sees "Generation took too long or silently failed" and may click "Generate Again" at 102 seconds, triggering a duplicate request before the first one completes.
+
+**Risk:** Medium. The 60-second batch guard in `generate-text/index.ts` prevents the text generation duplicate, but image generation has no equivalent guard after the timeout fires.
+
+**Fix:** Add a `recentlyTimedOut` Set that blocks re-generation for 30 seconds after a timeout.
+
+---
+
+### Finding 5: `wp-subscription-webhook` Does Not Validate `subscription_id` Type
+
+**Files:** `supabase/functions/wpsubscription-webhook/index.ts:293-300`
+
+The webhook extracts `subscription_id` from the payload and uses it in string operations. If WooCommerce sends an integer instead of a string (valid in their API), `String(subscription_id)` handles it. But if it sends `null` or an object, the trial injection call becomes `injectTrialIntoWpSubscription("null", ...)` which will fail.
+
+**Risk:** Low. WooCommerce is consistent, but defensive validation is missing.
+
+---
+
+### Finding 6: `billing-recon` `loopsSendTransactional` Has No Retry
+
+**Files:** `supabase/functions/billing-recon/index.ts:22-48`
+
+If the Loops API returns 5xx or times out, the function logs the error and returns `false`. The event remains unalerted. But there is no exponential backoff retry. A transient Loops outage means all alerts in that 15-minute window are lost.
+
+**Risk:** Medium. During a Loops outage, billing failures go silently unreported.
+
+**Fix:** Add 2 retries with 2s/4s backoff inside `loopsSendTransactional`.
+
+---
+
+### Finding 7: Social Post Routes Share `checkRateLimit` Code Duplication
+
+**Files:**
+- `app/api/social/facebook/post/route.ts`
+- `app/api/social/linkedin/post/route.ts`
+- `app/api/social/instagram/post/route.ts`
+
+Each route has an identical copy of `checkRateLimit` and `markPublished` (~40 lines each). This is 120 lines of duplication. If the rate limit window needs to change from 10s to 30s, three files must be edited.
+
+**Risk:** Low-Medium. Maintenance burden, risk of inconsistent limits.
+
+**Fix:** Extract to `lib/social/rateLimit.ts`.
+
+---
+
+### Finding 8: `generate-text` 60-Second Guard Is Per-User, Not Per-Idea
+
+**Files:** `supabase/functions/generate-text/index.ts:93-103`
+
+The simultaneous generation guard checks for ANY batch created by the user in the last 60 seconds. This means if User A generates for Profile 1, they cannot generate for Profile 2 within 60 seconds.
+
+**Risk:** Low. UX friction for users managing multiple businesses.
+
+**Fix:** Add `business_profile_id` to the guard query.
+
+---
+
+### Finding 9: `fal-webhook` JWT Verification Has No `iat` Check
+
+**Files:** `supabase/functions/fal-webhook/index.ts`
+
+The webhook verifies the JWT signature but does not check `iat` (issued at) or `exp` (expiry). A replayed token from an old request would be accepted.
+
+**Risk:** Low. The `jti` nonce in `generated_idea_batches` prevents replay at the DB level, but the JWT itself is not time-bound.
+
+---
+
+### Finding 10: `outscraper-worker` Has No Max Payload Size Guard
+
+**Files:** `supabase/functions/outscraper-worker/index.ts:469`
+
+After moving the webhook secret check to the top, the function still parses `req.json()` without a size limit. A 100MB JSON payload would exhaust the edge function's memory before the body parse completes.
+
+**Risk:** Low. Supabase Edge Functions have memory limits that would kill the request, but a size guard is cleaner.
+
+**Fix:** Check `req.headers.get('content-length')` before parsing.
+
+---
+
+## Full Backlog — Issues 11+
+
+| # | File | Line | Vulnerability | Technical Risk | Business ROI |
+|---|---|---|---|---|---|
+| 11 | `app/api/social/connections/route.ts` | 19 | `GET` returns all connections without filtering out expired tokens | Expired Facebook/LinkedIn tokens are surfaced as "connected" | Prevents "I connected Facebook but posts fail" support tickets |
+| 12 | `supabase/functions/wpsubscription-webhook/index.ts` | 222 | `secureCompare` uses `crypto.randomUUID` for nonce generation but not for token comparison | The function exists but the nonce is not actually used for anything | Dead code cleanup — reduces audit surface area |
+| 13 | `app/(app)/gallery/page.tsx` | 361 | `tagImageAction` called with `.catch(() => {})` on upload success | Auto-tag failures are silently swallowed | Prevents "my images have no tags" support tickets |
+| 14 | `supabase/functions/generate-text/index.ts` | 267 | Batch loop has no upper bound on `batchCount` | `count` is capped at 5, but `batchCount = Math.ceil(count / 3)` could still be 2, which is fine. However, if the cap is ever removed, this becomes unbounded. | Defense in depth |
+| 15 | `hooks/useImageGeneration.ts` | 210 | Channel subscription errors show generic toast | `CHANNEL_ERROR` or `TIMED_OUT` shows "Connection lost — check your image in the gallery" regardless of root cause | Better error messages reduce support tickets |
+| 16 | `lib/actions/galleryActions.ts` | 158 | `syncImageToWp` is fire-and-forget with `.catch(() => {})` | WordPress sync failures are invisible | Prevents "my images aren't on my website" support tickets |
+| 17 | `supabase/functions/execute-image/index.ts` | 233 | Parallel image generation uses `Array.from({ length: imageCount }).map(...)` | If `imageCount` is malformed (e.g., from a tampered execution plan), this creates undefined promises | Input validation gap |
+| 18 | `app/api/social/facebook/post/route.ts` | 107 | Success response does not include `pageId` used | Frontend cannot verify which page received the post | Debugging friction when users have multiple pages |
+| 19 | `supabase/functions/billing-recon/index.ts` | 105 | `recoveryLink` hardcodes `supabase.com/dashboard` | If project is on a different Supabase region/org, link is wrong | Operational friction during incident response |
+| 20 | `app/api/social/linkedin/post/route.ts` | 161 | `postId` extracted from `x-restli-id` header but not validated | If LinkedIn changes header name, `postId` is null with no error | Silent data loss in post history |
+
+---
+
+## Summary
+
+| Category | Count | Action |
+|---|---|---|
+| Critical Path Conflicts | 3 | Fix immediately (Conflicts 1–3) |
+| Deep State Audit Findings | 6 | Schedule for next sprint (Findings 4–9) |
+| Full Backlog (Issues 11–20) | 10 | Categorize and prioritize |
+
+**Immediate action required on Conflict 1 (double credit deduction).** The `alreadyProcessing` flag is a UI placebo, not a server-side guarantee.
