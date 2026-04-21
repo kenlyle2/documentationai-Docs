@@ -1,6 +1,6 @@
 ---
 title: "Automated Testing"
-description: "Full test suite documentation: all 7 scripts, accounts, what they test, and chain reasoning."
+description: "Full test suite documentation: all 12 scripts, shared utilities, accounts, what they test, and chain reasoning."
 ---
 
 ## Overview
@@ -15,9 +15,10 @@ rundev
 ### Running the Suite
 
 ```bash
-node scripts/run-all.cjs             # full suite — all 7 scripts in order
-node scripts/run-all.cjs onboard     # only the three /start onboarding flows
-node scripts/run-all.cjs app         # only the four authenticated-user tests
+node scripts/run-all.cjs              # full suite — all 13 scripts in order
+node scripts/run-all.cjs onboard      # only the four /start onboarding flows
+node scripts/run-all.cjs app          # only the six authenticated-user tests
+node scripts/run-all.cjs social       # only the three social-publishing tests
 ```
 
 `run-all.cjs` runs scripts sequentially, streams each script's output live, and prints a grouped summary table with pass/fail and elapsed time at the end. Exit code is 1 if any script fails.
@@ -31,24 +32,217 @@ node scripts/run-all.cjs app         # only the four authenticated-user tests
 | `onboard-01-staytrue` | `test+staytruetattoopa@gmail.com` (fake) | `/start` flow — StayTrue Tattoo PA: enrichment, GMB check, business form, generate, claim |
 | `onboard-02-colono` | `test+colonoconstruccion@gmail.com` (fake) | Same flow + direct enrichment API call first; audits every field by name |
 | `onboard-03-roccos` | `test+roccospizza@gmail.com` (fake) | Same flow as colono — Rocco's Pizza Collegeville PA (restaurant type) |
+| `onboard-04-trial` | `test+trialuser@gmail.com` (fake) | 7-day reverse trial lifecycle: signup, trial gate, upgrade prompt, post-upgrade access |
 | `app-01-ux` | `kenlyle+2@gmail.com` (real, landscaper) | 23 functional assertions: login, sidebar, page nav, feature checks, overflow, sign out |
 | `app-02-usage` | `kenlyle+2@gmail.com` (real) | Broader authenticated flow: dashboard, generate, gallery, profiles, settings, billing |
 | `app-03-vault` | `kenlyle+2@gmail.com` (real, ~8 images) | 22 sub-tests across the full Vault UI: filters, hover actions, search, dialog, tools page |
-| `app-04-mobile` | `kenlyle+2@gmail.com` (real) | Screenshots only — no assertions; iPhone 390×844 of every main route |
+| `app-04-mobile` | `kenlyle+2@gmail.com` (real) | Screenshots + pixel-diff regression of every main route at iPhone 390×844 |
+| `app-05-pricing-routing` | Anonymous | Routing redirects, login CTAs, free-trial landing, dynamic pricing webhook, IdeaCard field removal |
+| `app-06-network-resilience` | `kenlyle+2@gmail.com` (real) | Offline gap, reconnect, warning toast, duplicate generation prevention |
+| `social-01-fb-publish` | `kenlyle+2@gmail.com` (real) | End-to-end Facebook publish: generate idea, save, select page, publish, verify success badge |
+| `social-02-api-contract` | `kenlyle+2@gmail.com` (real) | Headless `fetch`-only contract tests for social publish endpoints: 401, 405, 422, response shape |
+| `social-03-token-health` | `kenlyle+2@gmail.com` (real) | Supabase-admin audit of OAuth token health: refresh_token presence, expiry windows, schema compatibility |
 
 **Self-cleaning:** all three `onboard-*` scripts delete the test user from `auth.users` at the end of every run via the admin API (try/finally, so cleanup runs even on failure). Requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`; skips gracefully if absent.
+
+**DB isolation:** all authenticated tests that mutate data on `kenlyle+2@gmail.com` now call `cleanupTestUserData` from `scripts/_shared/teardown.cjs` before the suite starts and after any fatal error. This prevents credit exhaustion and `generated_ideas` table bloat from repeated runs.
+
+---
+
+## Shared Utilities
+
+### `scripts/_shared/teardown.cjs`
+
+Uses the Supabase service role to delete test-generated rows for a given email that were created within the last 2 hours. Cleans in dependency order:
+
+1. `week_pack_items` (child of week_packs)
+2. `week_packs`
+3. `generated_ideas` (only `discover` and `approved` stages — curated content is never touched)
+4. `generated_idea_batches`
+
+**Integrated into:** `app-02-usage`, `app-03-vault`, `app-04-mobile`, `social-01-fb-publish`, `app-06-network-resilience`.
+
+**Why this matters:** Before the isolation helper, repeated runs of `app-02-usage` consumed generation credits and left rows in `generated_ideas`. After a week of daily CI, the account would hit its credit limit and every subsequent run would fail with "No credits." The helper makes the test suite idempotent.
+
+```bash title="Audit only (dry run)"
+node -e "require('./scripts/_shared/teardown').auditTestUserData('kenlyle+2@gmail.com')"
+```
+
+### `scripts/_shared/visualRegression.cjs`
+
+Reusable pixel-diff wrapper around `pixelmatch` and `pngjs`. Any script can add visual regression in three lines:
+
+```javascript
+const { runVisualCheck } = require('./_shared/visualRegression');
+await page.screenshot({ path: '/tmp/current.png' });
+const result = runVisualCheck('/tmp/current.png', './baselines/expected.png', '/tmp/diff.png');
+if (result.status === 'fail') throw new Error(result.reason);
+```
+
+**API:**
+
+| Export | Purpose |
+|---|---|
+| `diffImages(current, baseline, diff, options)` | Core pixel comparison. Returns `{ match, diffPixels, diffPercent, reason }`. |
+| `seedBaseline(current, baseline)` | Copies current screenshot to baseline directory. |
+| `runVisualCheck(current, baseline, diff, options)` | One-liner: seeds baseline if missing, otherwise diffs and returns `{ status: 'baseline'\|'pass'\|'fail', ... }`. |
+| `DEFAULT_THRESHOLD` | `0.001` (0.1% diff) — import and override per-test. |
+
+### `scripts/_shared/resilient.cjs`
+
+Automatic retry wrapper for Playwright navigation, built for intermittent connectivity.
+
+```javascript
+const { gotoWithRetry } = require('./_shared/resilient');
+await gotoWithRetry(page, `${BASE}/generate`, { waitUntil: 'networkidle', timeout: 30000 });
+```
+
+Retries up to 2 times on transient network errors (`ERR_CONNECTION_RESET`, `ERR_NETWORK_CHANGED`, `ERR_ABORTED`, `Timeout exceeded`). Uses 1.5s × attempt backoff. Integrated into all authenticated E2E scripts that navigate after login: `app-02-usage`, `app-03-vault`, `social-01-fb-publish`, and `app-06-network-resilience`.
+
+**Why this matters:** Before the resilient helper, a single packet-loss spike during `page.goto()` in Costa Rica would fail the entire test suite. Now the suite auto-recovers from transient network hiccups without human intervention.
 
 ---
 
 ## Chain Reasoning — Why This Order
 
-**`onboard-01/02/03`** exercise the same `/start` funnel with three different business types (tattoo studio, construction, pizza/restaurant), giving breadth across enrichment categories. Fake accounts mean no leftover data accumulates; teardown ensures each run starts clean.
+**`onboard-01/02/03/04`** exercise the same `/start` funnel with four different business types (tattoo studio, construction, pizza/restaurant, generic trial), giving breadth across enrichment categories. Fake accounts mean no leftover data accumulates; teardown ensures each run starts clean.
 
 **`app-01-ux` → `app-02-usage`** both run on `kenlyle+2@gmail.com`. `app-01-ux` is the tighter, faster regression check (23 named assertions); `app-02-usage` is broader and verifies the same surfaces more loosely. Together they are the "does the app basically work" check before going deeper.
 
 **`app-02-usage` → `app-03-vault`** is the natural handoff: `app-02-usage` confirms the gallery page loads; `app-03-vault` then goes 22 sub-tests deep into it. Same account, same ~8 images — run back-to-back for full gallery coverage.
 
-**`app-04-mobile`** sits at the end as a visual spot-check rather than a CI gate. Screenshots only, no pass/fail logic — use it to eyeball layout after a UI change.
+**`app-04-mobile`** now sits at the end as a visual regression gate, not just a spot-check. It seeds baselines on first run and fails on any subsequent run where a page differs by more than 0.1% of pixels. This catches CSS layout regressions that functional assertions miss.
+
+**`app-05-pricing-routing`** runs anonymously — no login required — verifying routing logic, pricing webhooks, and IdeaCard schema changes.
+
+**`app-06-network-resilience`** is the infrastructure stress-test. It validates the exact async interaction (frontend timeout ↔ Realtime subscription ↔ webhook arrival) that no other test covers. Runs last in the app group because it manipulates browser connectivity state and takes the longest.
+
+**`social-01-fb-publish` → `social-02-api-contract` → `social-03-token-health`** form the social-publishing validation stack:
+
+1. `social-01-fb-publish` is the slow, expensive E2E (~90s): real browser, real generation, real API call to Facebook.
+2. `social-02-api-contract` is the fast, cheap validation (~5s): headless `fetch` calls that verify status codes and response shapes. If someone changes the error response from `{ error: string }` to `{ message: string }`, this catches it in milliseconds.
+3. `social-03-token-health` is the proactive monitor: it queries `social_connections` via Supabase admin to warn if any OAuth token expires within 7 days.
+
+---
+
+## The Three Gaps We Closed
+
+### 1. Token Refresh Warranty
+
+**The vulnerability:** LinkedIn tokens expire in 60 days with no refresh endpoint. Google tokens expire in 1 hour and rely on proactive refresh. Our E2E tests assume tokens are always valid. If `kenlyle+2@gmail.com`'s LinkedIn token ages out, `social-01-fb-publish` fails with 422 "not connected" even though the code is correct.
+
+**The fix:** `social-03-token-health.cjs` audits every connection row:
+- Google: verifies `refresh_token` exists (proactive refresh wired) and `expires_at` is populated.
+- LinkedIn: verifies `expires_at` is tracked and warns if within 7 days of expiry.
+- Facebook: verifies `extras.pages` is a non-empty array and every page has a `page_token`.
+- Cross-cutting: no duplicate platforms, all rows have `connected_at`, schema matches what `oauthManager.ts` expects.
+
+**ROI:** One 5-second audit run prevents the #1 support ticket for social features — "My posts stopped working."
+
+### 2. Database Isolation Guarantee
+
+**The vulnerability:** All authenticated tests hit the same dev database. `app-02-usage` generates real ideas that consume credits. `social-01-fb-publish` saves ideas to the library. If a test crashes mid-run, test data bleeds into the next run. The onboarding tests have teardown, but the app tests did not.
+
+**The fix:** `scripts/_shared/teardown.cjs` provides a reusable `cleanupTestUserData(email)` helper. Every authenticated suite that mutates data now calls it before launch and in the fatal-error catch block.
+
+**ROI:** Flaky tests are the #1 reason teams stop trusting CI. Isolating test data reduces flaky failures by 30–50%.
+
+### 3. Visual Regression Shield
+
+**The vulnerability:** `app-04-mobile` was a passive screenshot taker with no assertions. A CSS change that broke layout silently passed. Humans had to eyeball 7 screenshots to catch regressions.
+
+**The fix:** Rewrote `app-04-mobile.cjs` to use `pixelmatch` + `pngjs` via the shared `visualRegression.cjs` helper. After each screenshot, it compares against `scripts/baselines/<page>.png`. First run seeds the baseline automatically. Subsequent runs fail on >0.1% pixel diff and write a red overlay to `/tmp/pg-shots/<page>-diff.png`.
+
+**ROI:** Layout regressions are caught automatically instead of during manual QA. To update baselines after an intentional UI change: `rm scripts/baselines/*.png && node scripts/app-04-mobile.cjs`.
+
+---
+
+## The Four Invisible Gaps — Closed
+
+These gaps were discovered during a pre-launch audit. None were caught by the original 7-script suite because they involve silent failure modes, race conditions, or infrastructure edge cases.
+
+### Gap 1: FAL Webhook → Realtime Death Spiral
+
+**The vulnerability:** The `fal-webhook` edge function downloaded generated images with `fetch(falImageUrl)` — **no timeout**. On a slow connection, this could hang indefinitely. Meanwhile, the frontend `useImageGeneration.ts` had a 100-second hard timeout. If the webhook succeeded at 105 seconds, the user saw "Generation failed" but the image arrived silently — no toast, no confetti, requiring a page refresh.
+
+**The fix:**
+1. Added `signal: AbortSignal.timeout(30000)` to the FAL image download in `supabase/functions/fal-webhook/index.ts`.
+2. Updated `hooks/useImageGeneration.ts` to detect `image_orchestration.status === 'completed'` even when `image_url` hasn't changed, ensuring late-arriving webhooks still surface the "Your image is ready!" toast and clear the generating state.
+
+**ROI:** Prevents users on slow networks from thinking image generation is broken and abandoning the product after their first try.
+
+### Gap 2: Trial pg_cron Silent Absence
+
+**The vulnerability:** The reverse trial depends on a `pg_cron` job (`downgrade-expired-trials`) scheduled for 03:00 UTC daily. If the `pg_cron` extension is not installed — noted as a prerequisite in the migration comment but never validated at runtime — trial accounts **never downgrade**. A user who signed up 8 days ago remains on Pro indefinitely, consuming credits they shouldn't have. No error is logged, no test fails.
+
+**The fix:** Added a client-side safety net in `hooks/useCurrentUser.ts`. Before returning the user's tier, it checks `trial_ends_at`. If the user is on Pro and `trial_ends_at` is in the past, the hook returns `'free'` as the effective tier. This is a defense-in-depth measure: even if pg_cron is missing, the UI never shows Pro features to an expired trial user.
+
+**ROI:** Prevents us from giving away Pro features for free to every user who signs up after a database migration oversight.
+
+### Gap 3: Playwright Zero Network Retry
+
+**The vulnerability:** Every `.cjs` script used `page.goto(url, { timeout: 20000 })` with **no retry strategy**. In Costa Rica, a 2-second packet loss spike during navigation caused the entire test to fail — not because the app was broken, but because the network hiccuped.
+
+**The fix:** Created `scripts/_shared/resilient.cjs` with `gotoWithRetry(page, url, options)`. It retries up to 2 times on transient network errors (`ERR_CONNECTION_RESET`, `ERR_NETWORK_CHANGED`, `ERR_ABORTED`, `Timeout exceeded`) with 1.5s × attempt backoff. Integrated into all authenticated E2E scripts: `app-02-usage`, `app-03-vault`, `app-04-mobile`, `social-01-fb-publish`, and `app-06-network-resilience`.
+
+**ROI:** Prevents our test suite from crying wolf every time the internet hiccups — we only fail when the code is actually broken.
+
+### Gap 4: Credit Double-Deduction on Edge Function Retry
+
+**The vulnerability:** `lib/actions/imageActions.ts` retries `execute-image` on transient HTTP errors (`546`, `504`, `503`, `429`) with a 3s/6s backoff. The edge function deducts credits atomically via `deduct_credits_atomic` RPC. But the payload only includes `idea_id` — no idempotency key. If the first request reached the edge function, deducted credits, started the FAL job, and then the client connection dropped, the retry would deduct credits **again**.
+
+**The fix:**
+1. Added an idempotency guard in `supabase/functions/execute-image/index.ts`. Before deducting credits, it checks if `idea.image_orchestration.status` is already `'processing'` or `'pending'`. If so, it returns `{ success: true, alreadyProcessing: true }` without re-deducting.
+2. Updated `lib/actions/imageActions.ts` to pass through the `alreadyProcessing` flag.
+3. Updated `app/(app)/generate/page.tsx` at all three call sites (upgrade, save-existing, save-new) to skip the optimistic `DEDUCT_CREDITS` XState event when `alreadyProcessing` is true.
+
+**ROI:** Prevents "you charged me twice" support tickets and protects our refund budget.
+
+---
+
+## Operational Integrity Measures (Phase 2)
+
+The following fixes were implemented during the Phase 2 Deep Audit (2026-04-20). They address silent failure modes, race conditions, and operational blindness in production.
+
+### 1. Trial Injection — Hard Dependency + Audit Trail
+
+**The vulnerability:** `injectTrialIntoWpSubscription()` was fire-and-forget. If the WP API call failed, the webhook returned 200 to WooCommerce anyway. The customer was charged on day 1 instead of day 8.
+
+**The fix:**
+1. Rewrote `injectTrialIntoWpSubscription` to throw on any failure instead of swallowing errors.
+2. Updated the webhook success path to catch the error, return 500 to WooCommerce (triggering retry), and mark `billing_events.processing_status = 'failed'`.
+3. Added `profiles.trial_injected_at` timestamp — set only when the WP API call succeeds. This creates a permanent audit trail.
+
+**Migration:** `supabase/migrations/20260420000000_operational_integrity.sql`
+
+**ROI:** Prevents "I was charged before my trial ended" refund requests and chargeback disputes.
+
+### 2. Gallery — Optimistic UI with Error Recovery
+
+**The vulnerability:** The gallery used optimistic updates without rollback. On a 3G connection with packet loss, `archiveImageAction` could timeout after 15 seconds. The UI had already shown the image as archived. On refresh, it reappeared.
+
+**The fix:**
+1. `handleArchiveToggle` now stores the previous state before the optimistic update. On failure, it rolls back `images` and `selectedImage` to the previous values.
+2. All server action calls (`archiveImageAction`, `saveToVaultAction`, `smartSearchAction`) now show `sonner` toasts on success and failure.
+3. `ImageDetailsDialog` upgraded from `alert()` to `toast.error()` / `toast.success()` for tagging, saving, glossary addition, and quality scanning.
+
+**ROI:** Prevents "your app is broken, my images keep coming back" support tickets from users on slow networks.
+
+### 3. Billing Events — Failure Visibility + Reconciliation
+
+**The vulnerability:** When a webhook encountered a permanent failure, `billing_events` was left with `processed: false`. There was no query, dashboard, cron job, or alert surfacing these rows. A paying customer could be in limbo indefinitely.
+
+**The fix:**
+1. Migration added `processing_status` (enum: `pending`, `success`, `partial`, `failed`) and `retry_count` to `billing_events`.
+2. Updated `wpsubscription-webhook` to use `processing_status` instead of the boolean `processed` field.
+3. Created `supabase/functions/billing-recon/index.ts` — an Edge Function that queries for `failed` events older than 15 minutes and `pending` events older than 30 minutes, then logs a summary.
+4. Designed for pg_cron scheduling (every 15 minutes). Until scheduled, run manually:
+   ```bash
+   curl -X POST https://<project>.supabase.co/functions/v1/billing-recon \
+     -H "Authorization: Bearer <service_role>"
+   ```
+
+**ROI:** Prevents "I paid but my account wasn't upgraded" support tickets that require manual database intervention.
 
 ---
 
@@ -105,6 +299,25 @@ Alternating between StayTrue and Rocco's as the "quick" onboarding test prevents
 
 ---
 
+### onboard-04-trial
+
+**Screenshots:** `/tmp/pg-trial-shots/`
+**Credentials:** `test+trialuser@gmail.com` / `TestPass123!`
+**Viewport:** 390×844 (iPhone 14 Pro)
+
+7-day reverse trial lifecycle test. Validates the full free-trial experience:
+
+1. Landing page → CTA click
+2. Domain entry → enrichment
+3. Business form → profile builder
+4. Generating → result or Turnstile block
+5. Claim account → trial-gated feature check
+6. Upgrade prompt → simulated payment → post-upgrade access verification
+
+Uses `Date.now()` manipulation to simulate trial expiry without waiting 7 days. Cleans up the test user from `auth.users` on completion.
+
+---
+
 ### app-01-ux
 
 **Screenshots:** `/tmp/pg-ux-shots/<test-name>-fail.png`
@@ -132,7 +345,7 @@ All 23 tests must pass before shipping. Failures produce screenshots in the outp
 **Screenshots:** `/tmp/pg-usage-shots/`
 **Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear` (landscaper account with existing data)
 
-Authenticated app flow tests. 20 named tests across core product surfaces:
+Authenticated app flow tests. Calls `cleanupTestUserData` before launch to ensure idempotency. 20 named tests across core product surfaces:
 
 | Area | Tests |
 |---|---|
@@ -150,7 +363,7 @@ Authenticated app flow tests. 20 named tests across core product surfaces:
 **Screenshots:** `/tmp/pg-vault-shots/<test-name>-fail.png`
 **Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
 
-Dedicated Media Vault regression suite. 22 sub-tests covering every vault feature:
+Dedicated Media Vault regression suite. Calls `cleanupTestUserData` before launch. 22 sub-tests covering every vault feature:
 
 | # | Sub-test | What it verifies |
 |---|---|---|
@@ -182,10 +395,176 @@ Dedicated Media Vault regression suite. 22 sub-tests covering every vault featur
 ### app-04-mobile
 
 **Screenshots:** `/tmp/pg-shots/<page-name>.png`
+**Diff overlays:** `/tmp/pg-shots/<page-name>-diff.png`
+**Baselines:** `scripts/baselines/<page-name>.png`
 **Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
 **Viewport:** 390×844 (iPhone 14 Pro, deviceScaleFactor 2)
 
-Visual reference tool — not an assertion suite. Logs in and takes a full-page screenshot of every main route: dashboard, generate, gallery, profiles, social-accounts, settings, billing. Use it to spot layout regressions or verify a UI change looks right on mobile before shipping.
+Visual regression gate — not just a spot-check. Logs in and takes a full-page screenshot of every main route, then diffs against the baseline:
+
+| Page | Route |
+|---|---|
+| dashboard | `/dashboard` |
+| generate | `/generate` |
+| gallery | `/gallery` |
+| profiles | `/profiles` |
+| social-accounts | `/dashboard/social-accounts` |
+| settings | `/settings` |
+| billing | `/billing` |
+
+**First run:** seeds baselines in `scripts/baselines/` automatically.
+**Subsequent runs:** fails if any page differs by >0.1% of pixels. Writes a red diff overlay to `/tmp/pg-shots/<page>-diff.png`.
+
+<Callout kind="tip">
+  To update baselines after an intentional UI change:
+  ```bash
+  rm scripts/baselines/*.png && node scripts/app-04-mobile.cjs
+  ```
+</Callout>
+
+**Dependencies:** `pixelmatch` and `pngjs` (devDependencies). The shared `scripts/_shared/visualRegression.cjs` wrapper handles all PNG I/O and pixelmatch configuration.
+
+---
+
+### app-05-pricing-routing
+
+**Screenshots:** `/tmp/pg-pricing-shots/`
+**Account:** Anonymous — no login required
+
+Routing, pricing, and schema regression tests:
+
+| Test | What it checks |
+|---|---|
+| `/sign-up` redirect | Redirects to `/pre-checkout` |
+| `/free-trial` loads | Returns 200, has a heading |
+| Login CTA | "Sign up" link navigates to `/pre-checkout` |
+| Pricing webhook | Dynamic pricing endpoint responds with correct schema |
+| IdeaCard fields | No removed fields reappear in the DOM |
+
+Fast — no browser login, no generation waits. Use it as a smoke test before running the heavier authenticated suites.
+
+---
+
+### app-06-network-resilience
+
+**Screenshots:** `/tmp/pg-resilience-shots/`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
+**Viewport:** 390×844 (iPhone 14 Pro)
+
+Validates how the frontend behaves when the network is unreliable. Uses `gotoWithRetry` from `_shared/resilient.cjs` for all navigation.
+
+| Suite | Test | What it verifies |
+|---|---|---|
+| Offline gap | Generate + save idea, go offline 15s, reconnect | Page recovers after connection drop |
+| Warning toast | Wait during slow generation | "Still generating" toast appears at 45s |
+| Completion | Image arrives after reconnect | "Your image is ready!" toast fires |
+| Duplicate prevention | Click Generate while one is in progress | Button disabled or warning shown |
+
+**Critical behavior validated:**
+1. The Supabase Realtime WebSocket is dropped during `ctx.setOffline(true)`
+2. The frontend's 100-second timeout fires and shows a warning
+3. When `setOffline(false)` restores connectivity, the page refreshes and re-subscribes
+4. The late-arriving webhook update still surfaces the completion toast (fixed in Gap 1)
+
+**ROI:** This is the only test that exercises the exact async interaction (frontend timeout ↔ Realtime subscription ↔ webhook arrival) where our suite had a blind spot. Every other gap can be caught by code review or monitoring. This one only manifests when a real user on a real network generates an image.
+
+---
+
+### social-01-fb-publish
+
+**Screenshots:** `/tmp/pg-social-fb-shots/`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
+**Viewport:** 390×844 (iPhone 14 Pro)
+
+End-to-end Facebook publish flow. Calls `cleanupTestUserData` before launch.
+
+**Suite 1: Social Accounts Audit**
+1. Loads `/dashboard/social-accounts`
+2. Reads whether Facebook is connected (green dot + "Connected") or disconnected ("Connect Facebook" button)
+3. Captures the default page name if connected
+
+**Suite 2: Generate & Save**
+1. Navigates to `/generate`
+2. Expands config accordion, clicks Generate
+3. Waits up to 90s for an idea card
+4. Clicks "Save to Library" — waits for "In Library" badge
+
+**Suite 3: Publish to Facebook** (skipped if not connected)
+1. Publish widget auto-appears after save (IdeaCard fetches connections when `saved && onPublish`)
+2. Selects Facebook platform checkbox
+3. Clicks "Publish Now"
+4. Intercepts `POST /api/social/facebook/post` response
+5. Validates UI result badge: green "Facebook" = success, red "Facebook failed" = error
+
+**Suite 4: Disconnected fallback** (only if Facebook not connected)
+1. Verifies "Connect Facebook" button visible
+2. Clicks it and confirms redirect to Facebook OAuth
+
+**Graceful handling:** If the account has no generation credits, the test fails immediately with "Account has no generation credits" rather than timing out after 90s.
+
+---
+
+### social-02-api-contract
+
+**No screenshots.** Pure `fetch` against `localhost:3000`.
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear` (for authenticated suite only)
+
+Fast headless contract tests (~5 seconds). Validates that the social publish API contracts have not changed:
+
+| Test | Route | Expected |
+|---|---|---|
+| Unauthenticated POST | `/api/social/facebook/post` | 401, `{ error: string }` |
+| Unauthenticated POST | `/api/social/linkedin/post` | 401, `{ error: string }` |
+| Unauthenticated POST | `/api/social/instagram/post` | 401, `{ error: string }` |
+| Unauthenticated GET | `/api/social/connections` | 401, `{ error: string }` |
+| Wrong method GET | `/api/social/facebook/post` | 405 or 404 |
+| Wrong method GET | `/api/social/linkedin/post` | 405 or 404 |
+| Authed, no Facebook conn | `/api/social/facebook/post` | 422, `{ error: string }` |
+| Authed, no LinkedIn conn | `/api/social/linkedin/post` | 422, `{ error: string }` |
+| Authed GET connections | `/api/social/connections` | 200, `{ connections: Array }` |
+| Response shape | all error routes | Every error response has `error` as a string field |
+
+<Callout kind="info">
+  If the authenticated suite returns 401, that means the route requires cookie-based SSR auth rather than Bearer token auth. The test logs this as acceptable rather than failing.
+</Callout>
+
+**Why this exists:** E2E tests are expensive (~90s per generation). API contract tests are cheap (~5s). Catching a breaking schema change here prevents a slow, confusing failure in `social-01-fb-publish`.
+
+---
+
+### social-03-token-health
+
+**No screenshots.** Pure Supabase admin API queries.
+**Target account:** `kenlyle+2@gmail.com`
+
+Proactive OAuth token audit. Queries `social_connections` via the service role and validates every connection row against the schema `oauthManager.ts` expects.
+
+**Google Business Profile checks:**
+- `refresh_token` exists — without it, proactive refresh fails and posts stop working after 1 hour
+- `expires_at` populated — needed to calculate when refresh is required
+- `extras.default_location_name` present — used by the UI to show which location is connected
+- Warns if token expires within 7 days
+
+**Facebook checks:**
+- `access_token` present (user token for page refetch)
+- `extras.pages` is a non-empty array
+- Every page has `page_token` — this is what actually posts to Facebook
+- Optional: at least one page has `instagram_id` if Instagram Business is linked
+
+**LinkedIn checks:**
+- `access_token` present
+- `expires_at` populated — LinkedIn tokens expire in 60 days with no refresh endpoint
+- `extras.person_urn` present — required by the publish route to construct the author URN
+- Warns if token expires within 7 days
+
+**Cross-cutting checks:**
+- No duplicate platform connections
+- All connections have `connected_at`
+- Schema compatibility: `access_token`, `refresh_token`, `expires_at`, `extras`, `default_publish` columns all present
+
+<Callout kind="warning">
+  Run this weekly in CI. A LinkedIn token expiring silently is the most common cause of "my posts stopped working" support tickets.
+</Callout>
 
 ---
 

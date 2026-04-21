@@ -154,6 +154,11 @@
                 "title": "Automated Testing",
                 "path": "admin/testing",
                 "icon": "check-square"
+              },
+              {
+                "title": "Security & Infrastructure Backlog",
+                "path": "admin/backlog",
+                "icon": "shield-alert"
               }
             ]
           }

@@ -1,0 +1,127 @@
+---
+title: "Security & Infrastructure Backlog"
+description: "Lower-priority vulnerabilities and hardening opportunities identified during audits. Sorted by risk level."
+---
+
+## Overview
+
+This document captures findings from Phase 2 Deep Audits that were below the Top 3 threshold but still represent meaningful risk. Each entry includes: Risk Level, The Vulnerability, Proposed Fix, and ROI.
+
+**Last updated:** 2026-04-20
+
+---
+
+## Issue 4: Turnstile Bypass is a Side-Channel for Enumeration
+
+**Risk Level:** Medium-High
+
+**The Vulnerability:** The `shouldSkipTurnstile` function in `supabase/functions/_shared/turnstile.ts` allows enumeration of admin email addresses. If an attacker sends repeated requests with guessed emails and `turnstileToken: 'localhost-bypass'`, a successful skip reveals a valid admin account. The email pattern check (`kenlyle+` prefix) leaks the naming convention.
+
+**Proposed Fix:**
+1. Remove the `isAdminEmail` check from `shouldSkipTurnstile` entirely.
+2. Instead, validate admin status against the `profiles` table (checking `is_admin = true`) after auth resolution, not before. The localhost bypass should require a signed JWT with an `admin` claim, not a guessable token string.
+
+**ROI:** Prevents brute-force enumeration of admin accounts via the generation API.
+
+---
+
+## Issue 5: `usage_daily` / `usage_monthly` Race Condition on Simultaneous Generations
+
+**Risk Level:** Medium
+
+**The Vulnerability:** The `deduct_credits_atomic` RPC uses `SELECT ... FOR UPDATE` to lock the `profiles` row during credit deduction. This is correct for a single generation. However, if a user opens two browser tabs and clicks Generate simultaneously, both requests race. The first lock holder deducts credits and returns. The second lock holder then reads the already-decremented value. The atomic function correctly prevents overdraft, but the UX shows two "Generating" states and only one result ever completes. The user pays twice and may think the second generated idea was lost.
+
+**Proposed Fix:**
+1. Add a `pending_generations` integer column to `profiles`.
+2. Increment before starting generation, decrement on completion (via webhook or timeout).
+3. Check `pending_generations > 0` in the frontend before allowing a second Generate click.
+
+**ROI:** Prevents double-charge confusion from users mashing the Generate button.
+
+---
+
+## Issue 6: Billing Events Table Has No Retention Policy
+
+**Risk Level:** Low-Medium
+
+**The Vulnerability:** `billing_events` accumulates indefinitely. Each WooCommerce webhook creates a row. At scale (1,000 customers renewing monthly), this table grows by 12,000 rows per year. The `raw_payload` JSONB column stores full webhook payloads including billing addresses — PII that should not be retained longer than necessary.
+
+**Proposed Fix:**
+1. Add a pg_cron job that deletes `billing_events` older than 90 days where `processing_status = 'success'`.
+2. For `failed` events, retain for 1 year to support debugging.
+3. Anonymize `raw_payload` by stripping billing addresses after 30 days.
+
+**ROI:** Reduces database storage costs and GDPR compliance surface area.
+
+---
+
+## Issue 7: Gallery `handleUpload` Has No Storage Cleanup on Partial Failures
+
+**Risk Level:** Low-Medium
+
+**The Vulnerability:** In `app/(app)/gallery/page.tsx`, the upload handler first writes to Supabase Storage, then inserts into `user_images`. If the DB insert fails (e.g., RLS violation, connection timeout), the storage object remains orphaned. There is no cleanup call in the catch block.
+
+**Proposed Fix:** In the `handleUpload` catch block, call `supabase.storage.from('user-gallery-images').remove([filePath])` to delete the orphaned object before surfacing the error.
+
+**ROI:** Prevents storage bucket bloat from failed uploads.
+
+---
+
+## Issue 8: `outscraper-worker` Webhook Secret is Checked After Body Parse
+
+**Risk Level:** Low
+
+**The Vulnerability:** In `supabase/functions/outscraper-worker/index.ts`, the webhook secret is validated after `await req.json()`. A malicious actor could send a large payload to exhaust Deno memory before the secret check rejects the request. This is a DoS vector, albeit low-impact for Supabase Edge Functions (they have memory limits).
+
+**Proposed Fix:** Move the `x-webhook-secret` validation to the top of the handler, before any body parsing.
+
+**ROI:** Prevents memory-exhaustion DoS on the outscraper-worker edge function.
+
+---
+
+## Issue 9: No Rate Limiting on `/api/social/*/post` Routes
+
+**Risk Level:** Low
+
+**The Vulnerability:** The social publish API routes (`/api/social/facebook/post`, `/api/social/linkedin/post`) have no rate limiting beyond the Supabase auth check. A compromised account could spam-publish to social platforms, hitting API rate limits and potentially getting the OAuth app blacklisted.
+
+**Proposed Fix:**
+1. Add a `last_publish_at` timestamp to `social_connections`.
+2. In each post route, check if `last_publish_at` is within the last 10 seconds. If so, return 429.
+3. Update `last_publish_at` on every successful publish.
+
+**ROI:** Protects social platform API health and prevents account suspension.
+
+---
+
+## Issue 10: `generate-text` Edge Function Does Not Validate `count` Parameter
+
+**Risk Level:** Low
+
+**The Vulnerability:** The `count` parameter in `generate-text/index.ts` defaults to 1 and is never validated against a maximum. A malicious authenticated user could send `count: 100` and generate 100 ideas in a single request, burning credits and overwhelming the OpenAI API.
+
+**Proposed Fix:** Add `count = Math.min(Math.max(1, count), 5)` at the top of the handler.
+
+**ROI:** Prevents credit arbitrage and API abuse.
+
+---
+
+## Backlog Protocol
+
+When performing future audits:
+1. Present Top 3 for immediate approval.
+2. Append Issues 4+ to this file with Risk Level and ROI.
+3. If an Issue is elevated to Top 3 status, move it to the top of this file and mark `status: 'in_progress'`.
+4. When an Issue is fixed, move it to a "Closed" section with fix date and files changed.
+
+**Closed Issues:**
+
+| # | Issue | Fixed | Files changed |
+|---|---|---|---|
+| 1 | FAL Webhook → Realtime Death Spiral | 2026-04-20 | `supabase/functions/fal-webhook/index.ts`, `hooks/useImageGeneration.ts` |
+| 2 | Trial pg_cron Silent Absence | 2026-04-20 | `hooks/useCurrentUser.ts` |
+| 3 | Playwright Zero Network Retry | 2026-04-20 | `scripts/_shared/resilient.cjs`, `app-02-usage`, `app-03-vault`, `social-01-fb-publish` |
+| 4 | Credit Double-Deduction on Retry | 2026-04-20 | `supabase/functions/execute-image/index.ts`, `lib/actions/imageActions.ts`, `app/(app)/generate/page.tsx` |
+| 5 | WooCommerce Trial Injection Fire-and-Forget | 2026-04-20 | `supabase/functions/wpsubscription-webhook/index.ts`, migration for `trial_injected_at` |
+| 6 | Gallery Optimistic UI Without Error Recovery | 2026-04-20 | `app/(app)/gallery/page.tsx`, `components/gallery/ImageDetailsDialog.tsx` |
+| 7 | billing_events Permanent Failures Invisible | 2026-04-20 | `supabase/migrations/`, `supabase/functions/billing-recon/index.ts`, `wpsubscription-webhook/index.ts` |
