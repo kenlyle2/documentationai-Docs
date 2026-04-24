@@ -1,0 +1,70 @@
+---
+title: "Tools"
+description: "Quality scanning and vault cleanup tools for keeping your Media Vault lean and your best images surfaced first."
+visibility: public
+---
+
+## Overview
+
+The **Tools** page (`/tools`) gives you two maintenance utilities for your Media Vault: quality scanning and vault cleanup. Neither is required — your vault works fine without them — but they become valuable once you have 50+ images.
+
+## Quality scanning
+
+PostGlider can rate every image in your vault on a 1–10 scale for marketing quality. The score reflects:
+
+- **Clarity** — is the subject sharp and in focus?
+- **Lighting** — is the scene well-lit with no harsh shadows?
+- **Subject prominence** — does the main subject fill the frame appropriately?
+- **Marketing fit** — does the image look like it belongs in a professional social post?
+
+### Running a quality scan
+
+The **Quality Scanning** section shows how many of your images have been scored and how many haven't. Click **Scan unscanned** to score every unscanned image in one batch.
+
+The scan runs in the background. You'll see a progress counter update as each image is processed.
+
+### Score distribution
+
+After scanning, you'll see a breakdown of your vault by score tier:
+
+| Tier | Score range | What it means |
+|---|---|---|
+| **High** | 8–10 | Strong marketing images — surface these first |
+| **Mid** | 5–7 | Usable but not standout — fine for general use |
+| **Low** | 1–4 | Weak technical quality — consider replacing or archiving |
+
+<Callout kind="tip">
+  Quality scores affect search result ordering in the Media Vault and in WordPress gallery search. Higher-scored images appear at the top of relevant results.
+</Callout>
+
+## Vault cleaner
+
+The Vault Cleaner identifies images that are taking up storage without contributing much value, and recommends whether to archive or delete them.
+
+### How it works
+
+The cleaner looks at two factors:
+
+1. **Usage** — how many times the image has been included in generated ideas
+2. **Quality score** — how the image scores on marketing quality
+
+It produces two candidate lists:
+
+| List | Candidates | Recommended action |
+|---|---|---|
+| **Archive candidates** | Images used 2+ times but with lower quality scores | Archive — you've used them, but there are better alternatives |
+| **Delete candidates** | Images with zero usage and older than 30 days | Delete — you've never used them, they're just taking up storage |
+
+### Running the cleaner
+
+Review both candidate lists. Each row shows a thumbnail, quality score, use count, and upload date. 
+
+Click **Execute recommended cleanup** to apply all recommendations at once, or act on individual images using the Archive or Delete buttons on each row.
+
+<Callout kind="warning">
+  Archived images are hidden from the active vault but are recoverable. Deleted images are permanently removed. Review the delete list carefully before confirming.
+</Callout>
+
+### Target storage size
+
+You can set a target vault size (in MB) in the cleaner. PostGlider will calculate how many images need to be removed to hit that target and prioritize the lowest-scoring, least-used images in the recommendations.

@@ -66,7 +66,7 @@
             ]
           },
           {
-            "group": "Media & Automation",
+            "group": "Media Vault",
             "icon": "image",
             "pages": [
               {
@@ -75,9 +75,56 @@
                 "icon": "layers"
               },
               {
+                "title": "Uploading Photos",
+                "path": "help-center/guides/upload-photos",
+                "icon": "upload"
+              }
+            ]
+          },
+          {
+            "group": "Your Business",
+            "icon": "briefcase",
+            "pages": [
+              {
+                "title": "Business Profiles",
+                "path": "business-profiles",
+                "icon": "briefcase"
+              },
+              {
+                "title": "Social Accounts",
+                "path": "social-accounts",
+                "icon": "plug"
+              },
+              {
                 "title": "Integrations",
                 "path": "integrations",
-                "icon": "plug"
+                "icon": "puzzle"
+              }
+            ]
+          },
+          {
+            "group": "Account",
+            "icon": "user",
+            "pages": [
+              {
+                "title": "Dashboard",
+                "path": "dashboard",
+                "icon": "layout-dashboard"
+              },
+              {
+                "title": "Billing & Plans",
+                "path": "billing-and-plans",
+                "icon": "credit-card"
+              },
+              {
+                "title": "Tools",
+                "path": "tools",
+                "icon": "wrench"
+              },
+              {
+                "title": "Settings",
+                "path": "settings",
+                "icon": "settings"
               }
             ]
           }
@@ -185,6 +232,21 @@
             "icon": "home"
           },
           {
+            "group": "Guides",
+            "icon": "book-open",
+            "expandable": false,
+            "pages": [
+              {
+                "title": "Setting up your business profile",
+                "path": "help-center/guides/business-profile"
+              },
+              {
+                "title": "How to upload photos",
+                "path": "help-center/guides/upload-photos"
+              }
+            ]
+          },
+          {
             "group": "FAQs",
             "icon": "help-circle",
             "expandable": false,
@@ -192,6 +254,14 @@
               {
                 "title": "Account & Billing",
                 "path": "help-center/faq/account-setup"
+              },
+              {
+                "title": "What are credits?",
+                "path": "help-center/faq/credits"
+              },
+              {
+                "title": "Social account questions",
+                "path": "help-center/faq/social-accounts"
               }
             ]
           },

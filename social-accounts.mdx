@@ -1,0 +1,80 @@
+---
+title: "Social accounts"
+description: "Connect your Google Business Profile, Facebook Page, and LinkedIn to publish content directly from PostGlider."
+visibility: public
+---
+
+## Supported platforms
+
+PostGlider connects directly to three platforms for publishing:
+
+| Platform | What you can publish |
+|---|---|
+| **Google Business Profile** | Posts to your GMB listing (Updates, Offers, Events) |
+| **Facebook** | Posts to your business Page |
+| **LinkedIn** | Posts to your personal profile or company page |
+
+Each platform requires a separate connection. You can connect all three or just the ones you use.
+
+## Connecting your accounts
+
+Go to **Social Accounts** from the sidebar or dashboard.
+
+<Steps>
+  <Step title="Choose a platform to connect" icon="plug">
+    On the Social Accounts page, find the card for the platform you want. Click **Connect**.
+  </Step>
+  <Step title="Authorize in the popup" icon="external-link">
+    A browser popup opens with the platform's sign-in flow. Sign in with the account that manages your business page or profile.
+
+    <Callout kind="warning">
+      Make sure you sign in as the **page admin**, not just a personal account. PostGlider needs admin-level access to publish on your behalf.
+    </Callout>
+  </Step>
+  <Step title="Confirm the connection" icon="check-circle">
+    Once you authorize, the popup closes and the card updates to show **Connected** with your page or profile name. If you see an error instead, see [Troubleshooting](#troubleshooting) below.
+  </Step>
+  <Step title="Set a default (optional)" icon="star">
+    If you want every post published here automatically when you approve an idea, click **Set as Default**. You can always override the channel on individual posts.
+  </Step>
+</Steps>
+
+## Google Business Profile specifics
+
+GMB publishing sends your content as a **Post** on your listing — the same format visible on your Google Maps listing and search results.
+
+Connecting GMB also unlocks:
+- **Photo import** — pull your existing GMB photos into the Media Vault, pre-tagged
+- **Review signals** — PostGlider reads your recent Google reviews to generate customer-voice content angles
+
+<Callout kind="tip">
+  GMB posts have a character limit of 1,500. PostGlider keeps captions within this limit automatically.
+</Callout>
+
+## Default publish channel
+
+Setting a platform as **Default** means PostGlider sends approved ideas there automatically when Butler is running. Without a default set, Butler queues ideas for manual review instead of publishing them.
+
+You can set one default per platform, or set multiple defaults if you want ideas sent to all connected channels simultaneously.
+
+## Disconnecting
+
+Click **Disconnect** on any connected platform card. The connection is removed immediately. Content already published through that connection is not affected — it stays on the platform.
+
+<Callout kind="info">
+  Disconnecting does not remove your posts from the platform. It only removes PostGlider's ability to publish new content.
+</Callout>
+
+## Troubleshooting
+
+**"Popup was blocked"**
+Allow popups for PostGlider in your browser settings, then try connecting again.
+
+**"Authorization failed" or "Permission denied"**
+You may have signed in with an account that doesn't have admin access to the business page. Sign into the platform directly, confirm you're an admin, then return to PostGlider and retry.
+
+**Connection shows as expired**
+OAuth tokens expire after a period of inactivity. Click **Reconnect** to re-authorize. Your publish history and settings are preserved.
+
+**Facebook Page not appearing in the selector**
+Facebook requires that your Page be linked to your personal account as an admin. Check your Facebook Business settings and ensure the Page appears under your managed Pages.
