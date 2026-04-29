@@ -102,9 +102,11 @@ Results are ordered by `quality_score DESC` — best images surface first.
   </Step>
 </Steps>
 
-## Backfilling Existing Images
+## Backfilling existing images
 
-For users with existing tagged images, trigger a sync backfill via the admin endpoint:
+### Via tag-backlog (re-tags + syncs)
+
+For users with untagged images, use the admin endpoint — it re-tags and syncs in one pass:
 
 ```bash
 curl -X POST https://app.postglider.com/api/admin/tag-backlog \
@@ -113,4 +115,28 @@ curl -X POST https://app.postglider.com/api/admin/tag-backlog \
   -d '{"userId": "<uuid>", "batchSize": 50}'
 ```
 
-This re-tags untagged images and syncs all of them to the WordPress subsite.
+### Via sync-image directly (already-tagged images)
+
+When images are already tagged in Supabase but never reached WordPress (e.g., sync calls failed before the Cloudflare Worker was deployed), call `sync-image` directly for each image:
+
+```bash
+curl -X POST "https://<slug>.mypostglider.website/wp-json/postglider/v1/sync-image" \
+  -H "Content-Type: application/json" \
+  -H "X-Gallery-Token: pg_gallery_<hex>" \
+  -d '{
+    "image_id": "<uuid>",
+    "public_url": "<supabase-storage-url>",
+    "tags": ["tag1", "tag2"],
+    "description": "One-sentence AI description."
+  }'
+```
+
+To get the gallery token and image data for a user:
+
+```sql
+-- Gallery token
+SELECT token FROM gallery_tokens WHERE user_id = '<uuid>';
+
+-- Images to backfill
+SELECT id, public_url, description, tags FROM user_images WHERE user_id = '<uuid>';
+```

@@ -14,15 +14,18 @@ visibility: internal
 
 ```
 pg-media-vault/
-  .github/workflows/release.yml   ← builds zip and creates GitHub release on tag push
+  .github/workflows/release.yml   ← zips plugin + creates GitHub release on tag push (automatic)
   plugins/
     postglider-adapter/
       includes/
         auth.php                   ← multisite-aware option helpers (pg_get_option / pg_set_option)
-        search.php                 ← REST endpoint + backend proxy
+        cpt.php                    ← pg_gallery_image CPT registration + featured-image shim
+        gallery.php                ← [pg_gallery] shortcode — responsive image grid
+        search.php                 ← GET /wp-json/postglider/v1/search — Supabase proxy for SearchIQ
+        sync.php                   ← POST /wp-json/postglider/v1/sync-image — upserts stub posts
+        network-api.php            ← POST /wp-json/postglider/v1/create-site + configure-site (super admin)
         admin-settings.php         ← per-subsite settings page (Settings → PostGlider)
-        network-api.php            ← POST /wp-json/postglider/v1/configure-site (super admin)
-        updater.php                ← polls metadata.json, surfaces WP update notices
+        updater.php                ← fetches metadata.json, surfaces WP update notices (1 hr cache)
       postglider-adapter.php       ← plugin header + constants + require_once chain
   supabase/functions/gallery-search/
     index.ts                       ← edge function source (canonical copy; deploy from postglider2)
@@ -39,18 +42,15 @@ pg-media-vault/
 #    - plugins/postglider-adapter/postglider-adapter.php (POSTGLIDER_ADAPTER_VERSION constant + header)
 #    - metadata.json (version, download_url pointing to new tag, changelog entry)
 
-# 3. Commit and push
-git add -A && git commit -m "feat(plugin): vX.Y.Z — description"
-git push
-
-# 4. Tag — GitHub Actions does the rest
+# 3. Commit, tag, and push — Actions handles the rest
+git add -A && git commit -m "fix(plugin): description; bump to vX.Y.Z"
 git tag vX.Y.Z
-git push origin vX.Y.Z
+git push origin main --tags
 ```
 
-GitHub Actions (`.github/workflows/release.yml`) runs in seconds: checks out the repo, zips `plugins/postglider-adapter/`, creates the GitHub release, attaches the zip as a release asset. No manual zip handling.
+`.github/workflows/release.yml` triggers on `v*` tag push: zips `plugins/postglider-adapter/`, creates the GitHub release, attaches the zip. No manual `gh release create` needed.
 
-WordPress sites check `metadata.json` every 12 hours. When `version` in `metadata.json` is higher than the installed version, a standard WP update notice appears in Network Admin → Plugins.
+WordPress sites check `metadata.json` via a 1-hour site transient cache. When `version` in `metadata.json` is higher than the installed version, a standard WP update notice appears in Network Admin → Plugins. **Check Again** clears the cache immediately.
 
 ### Initial Install (New Client Site)
 

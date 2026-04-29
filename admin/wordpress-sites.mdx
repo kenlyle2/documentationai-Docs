@@ -33,28 +33,91 @@ WordPress Multisite. Each PostGlider user gets a subsite automatically when thei
 
 The `pg-media-vault` plugin is network-activated here and exposes the `postglider/v1/search` REST endpoint on each subsite. SearchIQ indexes that endpoint to make the user's AI-tagged images semantically searchable inside WordPress.
 
-## Subsite Provisioning Flow
+## Subsite provisioning flow
 
 ```mermaid
 sequenceDiagram
     participant App as PostGlider App
     participant WP as mypostglider.website
-    participant DB as Database
+    participant DB as Supabase
 
-    App->>WP: POST /wp-json/wp/v2/sites/create
-    WP-->>App: subsite created, slug returned
-    App->>DB: profiles.wp_subsite_slug = slug
+    App->>WP: POST /wp-json/postglider/v1/create-site
+    Note over WP: Creates subsite (idempotent by domain)<br/>Sets public=1, adds all super admins
+    WP-->>App: { blog_id, ok }
     App->>WP: POST /wp-json/postglider/v1/configure-site
-    Note over App,WP: Pushes gallery token + anon key to subsite
+    Note over WP: Writes gallery_token + supabase_url blog options<br/>Auto-creates Gallery page + nav menu
+    App->>DB: profiles.wp_subsite_slug = slug
 ```
 
 The `apiguy` Application Password (stored as `WP_API_APP_PASSWORD` in `.env.local`) is used for provisioning — super admin credentials.
 
 <Callout kind="info">
-  The App Passwords toggle must be ON in the hosting control panel. Enable it at: Hosting control panel → Tools → Application Passwords.
+  The App Passwords toggle must be ON in the hosting control panel. Enable it at: **Hosting control panel → Tools → Application Passwords**.
 </Callout>
 
-## Key WordPress Credentials
+## Subdomain routing — how `*.mypostglider.website` works
+
+Hostinger serves one vhost for the domain with no per-subdomain vhosts and no public API to create them. Subdomains are routed via a **Cloudflare Worker** that rewrites every subdomain request to the main vhost while preserving the original hostname in a header.
+
+### Cloudflare Worker (`pg-subdomain-router`)
+
+Repo: `kenlyle2/pg-subdomain-worker`. Deployed to Cloudflare Workers, bound to `*.mypostglider.website/*`.
+
+1. Receives a request for e.g. `stay-true-tattoo.mypostglider.website/gallery/`
+2. Rewrites the URL hostname to `mypostglider.website`
+3. Adds `X-Forwarded-Host: stay-true-tattoo.mypostglider.website`
+4. Forwards the request; returns the response unchanged
+
+To redeploy after changes:
+
+```bash
+cd ~/projects/pg-subdomain-worker
+npx wrangler deploy   # CLOUDFLARE_API_TOKEN must be set in ~/.bashrc
+```
+
+### `wp-config.php` X-Forwarded-Host fix
+
+The following lines in `wp-config.php` (before `wp-settings.php` is loaded) restore the original subdomain so WordPress loads the correct subsite:
+
+```php
+if ( isset( $_SERVER['HTTP_X_FORWARDED_HOST'] ) ) {
+    $_SERVER['HTTP_HOST'] = $_SERVER['HTTP_X_FORWARDED_HOST'];
+}
+```
+
+### Cloudflare SSL configuration
+
+| Scope | Mode | Reason |
+|---|---|---|
+| `mypostglider.website` (main) | Full (Strict) | Origin has a valid cert |
+| `*.mypostglider.website` (subdomains) | Flexible (Configuration Rule) | Hostinger origin cert only covers the apex domain |
+
+Without the Configuration Rule, subdomain requests return a **525 SSL Handshake Failed** error.
+
+### DNS
+
+A single wildcard A record at Cloudflare proxies all subdomains:
+
+```
+* A 147.79.72.55  Proxied
+```
+
+No per-subdomain DNS entries are needed. New subsites are reachable immediately after `create-site` registers them in `wp_blogs`.
+
+## Gallery page auto-creation
+
+`configure-site` calls `pg_setup_gallery_page()` after writing credentials. This function (idempotent via `_pg_gallery_page` post meta):
+
+1. Creates a published page titled "Gallery" with content `[pg_gallery]`
+2. Creates or reuses a nav menu named "Main Menu"
+3. Adds the Gallery page as a menu item
+4. Assigns the menu to every registered nav location that doesn't already have one
+
+Every newly provisioned subsite has a working gallery at `/gallery/` in the nav immediately — before SearchIQ is configured.
+
+The `[pg_gallery]` shortcode (registered in `gallery.php`) queries `pg_gallery_image` CPT posts, renders a CSS grid from `_pg_image_url` meta, and shows WP tag names as figcaptions.
+
+## Key WordPress credentials
 
 | Credential | Env var | Notes |
 |---|---|---|
