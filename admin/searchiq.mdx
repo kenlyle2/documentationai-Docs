@@ -1,112 +1,160 @@
 ---
-title: "SearchIQ & Image Sync"
-description: "How AI-tagged vault images are made searchable on WordPress via stub posts and the gallery-search edge function."
+title: "SearchIQ & Media Vault Search"
+description: "Architecture, facet strategy, taxonomy design, and thesaurus integration for SearchIQ-powered gallery search on client subsites."
 visibility: internal
+---
+
+## Why SearchIQ (architecture rationale)
+
+SearchIQ is PostGlider's primary search UI for client gallery pages. This is a deliberate, permanent partnership — not a dependency to be abstracted away.
+
+**What SearchIQ owns that we don't want to rebuild:**
+- Autocomplete UI with full visual customization (colors, fonts, layout) via plugin settings — zero code to maintain
+- Faceted results page (Date, Category, Tags, Author/Artist) driven by WordPress taxonomies — configured in the admin, not in code
+- A free tier of 10,000 documents per domain, with two merged AppSumo lifetime accounts (5,000 documents each) available for premium clients
+
+**Why lock-in is not a concern:**  
+All data lives in WordPress CPT posts (`pg_gallery_image`) backed by Supabase Storage. Taxonomies are standard WordPress constructs. If SearchIQ ever disappeared, the stubs, tags, and structured facet data would remain intact and fully portable to any other search tool. There is no proprietary serialization.
+
+**The combination that makes this exceptional:**  
+PostGlider's Datamuse thesaurus expansion (cached in `search_expansions` table) plus SearchIQ's synonym group configuration means a visitor searching "botanical" finds images tagged "floral", and vice versa — without any hardcoded synonym lists and without rebuilding a search UI.
+
 ---
 
 ## Architecture
 
+SearchIQ indexes WordPress CPT posts natively — it does not call external REST APIs. The PostGlider Adapter syncs AI-tagged image metadata into stub posts on each client's WordPress subsite; SearchIQ indexes those stubs. Actual image files never leave Supabase Storage.
+
 ```mermaid
 flowchart TD
-    A[WordPress visitor searches] --> B[SearchIQ]
-    B --> C[PostGlider Adapter REST endpoint]
-    C --> D[X-Gallery-Token header]
-    D --> E[gallery-search edge function]
-    E --> F{Validate token}
-    F --> G[Query user_images WHERE search_tsv matches]
-    G --> H[Return results ordered by quality_score DESC]
+    A[PostGlider tags image] --> B[syncImageToWp]
+    B --> C[POST /wp-json/postglider/v1/sync-image]
+    C --> D[pg_gallery_image stub created/updated]
+    D --> E[Tags → post_tag\nArtist → pg_artist\nContent type → pg_content_type]
+    E --> F[SearchIQ indexes stub]
+    F --> G[searchiq shortcode on gallery page]
+    G --> H[Visitor sees faceted search results\nwith Supabase-hosted image thumbnails]
 ```
 
-SearchIQ can only index WordPress content — it cannot call external REST APIs directly. The PostGlider Adapter creates thin **stub posts** inside each client's WordPress subsite. SearchIQ indexes these stubs; actual image files never leave PostGlider's storage.
+The `gallery-search` edge function and `/wp-json/postglider/v1/search` REST endpoint remain in place for direct API access and testing but are not in the SearchIQ indexing path.
 
-## Stub Post Structure
+---
 
-| Field | Content |
-|---|---|
-| Title | Tags joined with ` · ` — e.g. `Landscape Lighting · Water Feature · Hardscape` |
-| Content | `<img src="supabase-cdn-url">` + AI description paragraph |
-| Excerpt | AI description sentence |
-| WP Tags | Each AI tag as a `post_tag` term — powers SearchIQ facets |
-| Slug | `pg-img-<image-uuid>` — deterministic, enables idempotent upserts |
+## Stub post structure
 
-## Image Sync Flow
-
-```
-tagImageAction() writes tags + description to user_images
-  └── syncImageToWp(imageId, publicUrl, tags, description, userId)
-        ├── looks up profiles.wp_subsite_slug
-        ├── looks up gallery_tokens.token
-        └── POST https://<slug>.mypostglider.website/wp-json/postglider/v1/sync-image
-              X-Gallery-Token: pg_gallery_<hex>
-              → creates or updates pg_gallery_image stub post
-```
-
-The call is fire-and-forget. If the subsite isn't provisioned yet, `syncImageToWp` no-ops silently.
-
-## Gallery Token Security
-
-Tokens are `pg_gallery_` + 24 random bytes = 48 hex characters (~192 bits of entropy). They are stored in plaintext in `gallery_tokens` — row-level security (RLS) and service-role-only write access are the security boundary. Clients can revoke instantly if compromised.
-
-| Operation | Who can do it |
-|---|---|
-| `SELECT` own token | Authenticated user (RLS) |
-| `DELETE` own token | Authenticated user (RLS) |
-| `INSERT` / `UPDATE` | Service role only (API route + edge function) |
-
-The edge function accepts two auth paths:
-- `X-Gallery-Token` header — for the WordPress adapter (long-lived, revocable)
-- `Authorization: Bearer <jwt>` — for dev/testing with a real user session
-
-## Search Query Behavior
-
-The edge function uses `textSearch` with `type: 'websearch'`, mapping to Postgres `websearch_to_tsquery`.
-
-| Query | Behavior |
-|---|---|
-| `red dragon` | Both words must match |
-| `"red dragon"` | Exact phrase |
-| `dragon OR eagle` | Either word |
-| `dragon -eagle` | Dragon but not eagle |
-| `large red dragon` | All three words |
-
-Results are ordered by `quality_score DESC` — best images surface first.
-
-## Database Objects
-
-| Object | Migration | Purpose |
+| Field | Content | SearchIQ role |
 |---|---|---|
-| `user_images.search_tsv` | `20260415001000` | tsvector column, trigger-maintained over tags + description |
-| `gallery_tokens` table | `20260415002000` | One row per user; RLS owner-only select/delete |
-| `tg_user_images_search_tsv` trigger | `20260415001000` | Keeps search_tsv updated on insert/update |
-| GIN index on `search_tsv` | `20260415001000` | Fast full-text search |
+| Title | Tags joined with ` · ` (first 8, title-cased) | Full-text search + result card heading |
+| Content | `<img src="supabase-cdn-url">` + AI description paragraph | Full-text search body |
+| Excerpt | AI description sentence | Result card snippet |
+| `post_tag` terms | Each AI tag as a WP tag term | **Tags facet** |
+| `pg_artist` terms | Named artist / stylist | **Artist facet** (Author equivalent) |
+| `pg_content_type` terms | Content category (see below) | **Category facet** |
+| `_pg_image_url` meta | Supabase Storage public URL | Thumbnail in search results (via `thumbnail_url` REST field) |
+| Slug | `pg-img-<image-uuid>` | Idempotent upserts |
 
-<Callout kind="info">
-  The trigger (not `GENERATED ALWAYS`) is intentional. `array_to_string` is `STABLE`, not `IMMUTABLE`, in the current Postgres version — generated columns require `IMMUTABLE` functions.
-</Callout>
+Images display in SearchIQ results via the `thumbnail_url` field injected into the CPT's REST API response — Supabase Storage serves them directly. SearchIQ does not host or proxy images.
 
-## Per-Client SearchIQ Setup
+---
+
+## Facet taxonomy design
+
+### `post_tag` — AI tags
+
+Every AI tag written to `user_images.tags` is synced as a WP `post_tag` term. These are the richest facet: for a tattoo shop they include style descriptors (`neo-traditional`, `blackwork`), subject matter (`dragon`, `rose`, `portrait`), and technique (`fine-line`, `color-realism`).
+
+### `pg_artist` — artist / stylist name
+
+Flat (non-hierarchical) taxonomy. One term per image. Populated from the `artist` field in the sync payload. For a multi-artist tattoo studio, this is the equivalent of SearchIQ's Author facet — visitors filter by their preferred artist.
+
+Sync payload field: `"artist": "Mike Torres"`
+
+### `pg_content_type` — content category
+
+Hierarchical taxonomy for the type of image. Pre-defined terms:
+
+| Term slug | Label | Use case |
+|---|---|---|
+| `portrait` | Portrait | Artist headshots, client close-ups |
+| `workspace` | Workspace | Shop interior, station shots |
+| `before-after` | Before/After | Healed tattoo comparisons |
+| `product-shot` | Product Shot | Merchandise, flash sheets |
+| `team-culture` | Team Culture | Staff events, behind the scenes |
+| `promotional` | Promotional | Sales, gift cards, announcements |
+| `client-spotlight` | Client Spotlight | Client testimonials with photo |
+
+Sync payload field: `"content_type": "before-after"`
+
+Both `artist` and `content_type` are optional in the sync payload. Stubs without them still index and appear in search; they simply have fewer facet options.
+
+---
+
+## Thesaurus expansion → SearchIQ synonyms
+
+PostGlider maintains a `search_expansions` Supabase table: for every search term ever used, Datamuse returns up to 15 semantically related words (score-filtered to > 500). This cache grows automatically as users search.
+
+To feed that data into SearchIQ:
+
+1. Query the cache for high-confidence pairs:
+
+```sql
+SELECT term, jsonb_array_elements(expansions::jsonb) AS expansion
+FROM search_expansions
+WHERE (jsonb_array_elements(expansions::jsonb)->>'score')::int > 700;
+```
+
+2. In SearchIQ admin → Synonyms, add bidirectional pairs from that output.
+
+This is a periodic manual step (or can be scripted against the SearchIQ REST API if they expose one). The `search_expansions` table is the source of truth — it is non-proprietary Postgres JSON that works independently of SearchIQ.
+
+**Result:** A visitor searching "botanical" on the gallery page gets results tagged "floral", "cherry blossom", "garden" without any hardcoded synonym list and without custom search code to maintain.
+
+---
+
+## Gallery page: `[pg_gallery]` vs `[searchiq]`
+
+| Shortcode | When to use |
+|---|---|
+| `[pg_gallery]` | Immediately after subsite provisioning — works without SearchIQ installed. Client-side JS filtering only, no facets. |
+| `[searchiq]` | Production gallery page once SearchIQ is installed and the index is built. Full faceted search, autocomplete, visual customization. |
+
+Auto-provisioning (`configure-site`) creates the Gallery page with `[pg_gallery]` so the page works from day one. Once SearchIQ is configured, edit the Gallery page and replace `[pg_gallery]` with `[searchiq]`.
+
+---
+
+## Per-client SearchIQ setup
 
 <Steps>
-  <Step title="Install SearchIQ plugin on the subsite" icon="package">
-    Network-activate or per-site install via WordPress admin.
-  </Step>
-  <Step title="Enter the SearchIQ API key" icon="key">
-    SearchIQ → Settings → enter the API key for that domain.
+  <Step title="Install SearchIQ plugin" icon="package">
+    Network-activate on `mypostglider.website` so all subsites inherit it, or install per-site. Enter the API key in SearchIQ → Settings.
 
     <Callout kind="info">
-      Two AppSumo Startup Package licenses are available: 5,000 documents each, unlimited domains per license. Assign one domain per license; rotate as needed for new client deployments.
+      Two AppSumo lifetime accounts (5,000 documents each, merged into a single pool) are available for premium clients. The free tier covers 10,000 documents per domain — sufficient for most clients indefinitely.
     </Callout>
   </Step>
+  <Step title="Configure post types and taxonomies" icon="settings">
+    SearchIQ → Settings → Post Types: enable `pg_gallery_image`.
+
+    SearchIQ → Settings → Facets: enable Tags (`post_tag`), Artist (`pg_artist`), Content Type (`pg_content_type`), Date.
+
+    SearchIQ → Appearance: set colors, fonts, and autocomplete layout to match the client's brand.
+  </Step>
   <Step title="Trigger an index crawl" icon="search">
-    SearchIQ → Index → trigger a crawl. Stub posts populate as images are tagged in PostGlider.
+    SearchIQ → Index → trigger a crawl. Stubs must already be present (run a backfill if needed — see below).
+  </Step>
+  <Step title="Replace gallery shortcode" icon="edit">
+    WordPress admin → Pages → Gallery → edit. Replace `[pg_gallery]` with `[searchiq]`. Publish.
+  </Step>
+  <Step title="Seed synonyms" icon="book-open">
+    Query `search_expansions` (see above) and add high-score pairs to SearchIQ → Synonyms. Repeat quarterly as the cache grows.
   </Step>
 </Steps>
+
+---
 
 ## Backfilling existing images
 
 ### Via tag-backlog (re-tags + syncs)
-
-For users with untagged images, use the admin endpoint — it re-tags and syncs in one pass:
 
 ```bash
 curl -X POST https://app.postglider.com/api/admin/tag-backlog \
@@ -117,8 +165,6 @@ curl -X POST https://app.postglider.com/api/admin/tag-backlog \
 
 ### Via sync-image directly (already-tagged images)
 
-When images are already tagged in Supabase but never reached WordPress (e.g., sync calls failed before the Cloudflare Worker was deployed), call `sync-image` directly for each image:
-
 ```bash
 curl -X POST "https://<slug>.mypostglider.website/wp-json/postglider/v1/sync-image" \
   -H "Content-Type: application/json" \
@@ -126,17 +172,63 @@ curl -X POST "https://<slug>.mypostglider.website/wp-json/postglider/v1/sync-ima
   -d '{
     "image_id": "<uuid>",
     "public_url": "<supabase-storage-url>",
-    "tags": ["tag1", "tag2"],
-    "description": "One-sentence AI description."
+    "tags": ["neo-traditional", "rose", "color-realism"],
+    "description": "A vibrant neo-traditional rose tattoo on the forearm.",
+    "artist": "Mike Torres",
+    "content_type": "portrait"
   }'
 ```
 
-To get the gallery token and image data for a user:
+Useful SQL for backfill prep:
 
 ```sql
--- Gallery token
+-- Gallery token for a user
 SELECT token FROM gallery_tokens WHERE user_id = '<uuid>';
 
 -- Images to backfill
 SELECT id, public_url, description, tags FROM user_images WHERE user_id = '<uuid>';
 ```
+
+---
+
+## Future: WooCommerce products as gallery posts
+
+WooCommerce products are a natural fit for gallery images that have associated pricing — flash designs, merchandise, booking packages. Products carry Title, Description, Categories, Tags, and Price out of the box. SearchIQ can facet on all of these plus a custom "Artist" product attribute.
+
+This path makes sense when a client wants a searchable, purchasable portfolio — e.g., a tattoo shop selling flash designs or booking deposits online. Implementation notes:
+
+- Products sync alongside `pg_gallery_image` stubs, or replace them for that client
+- SearchIQ's Price facet (range slider) becomes available automatically
+- No additional taxonomy work needed — WooCommerce categories and tags map directly to SearchIQ facets
+
+This is a separate initiative and should be scoped per client when the pricing use case is confirmed.
+
+---
+
+## Database objects
+
+| Object | Migration | Purpose |
+|---|---|---|
+| `user_images.search_tsv` | `20260415001000` | tsvector column, trigger-maintained over tags + description |
+| `gallery_tokens` table | `20260415002000` | One row per user; RLS owner-only select/delete |
+| `search_expansions` table | (galleryActions) | Datamuse thesaurus cache — source of truth for synonyms |
+| `tg_user_images_search_tsv` trigger | `20260415001000` | Keeps search_tsv updated on insert/update |
+| GIN index on `search_tsv` | `20260415001000` | Fast full-text search |
+
+<Callout kind="info">
+  The `search_tsv` trigger (not `GENERATED ALWAYS`) is intentional. `array_to_string` is `STABLE`, not `IMMUTABLE`, in the current Postgres version — generated columns require `IMMUTABLE` functions.
+</Callout>
+
+## Gallery token security
+
+Tokens are `pg_gallery_` + 24 random bytes = 48 hex characters (~192 bits of entropy). Stored in plaintext in `gallery_tokens` — RLS and service-role-only write access are the security boundary.
+
+| Operation | Who can do it |
+|---|---|
+| `SELECT` own token | Authenticated user (RLS) |
+| `DELETE` own token | Authenticated user (RLS) |
+| `INSERT` / `UPDATE` | Service role only |
+
+The edge function accepts two auth paths:
+- `X-Gallery-Token` header — for the WordPress adapter (long-lived, revocable)
+- `Authorization: Bearer <jwt>` — for dev/testing with a real user session
