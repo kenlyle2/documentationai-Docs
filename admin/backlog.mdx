@@ -107,6 +107,32 @@ This document captures findings from Phase 2 Deep Audits that were below the Top
 
 ---
 
+---
+
+## Feature Backlog
+
+### SearchIQ faceted search widget on gallery pages
+
+**Priority:** Low — current client-side search in `[pg_gallery]` handles galleries up to ~200 images well.
+
+**The opportunity:** Replace or supplement the built-in client-side tag-chip search with a SearchIQ-powered widget. SearchIQ's widget provides server-side full-text ranking, typo tolerance, synonym expansion, and analytics — capabilities that matter once a user's vault grows into the hundreds of images.
+
+**Why deferred:** The built-in `[pg_gallery]` shortcode already does live tag-chip filtering and text search with no per-domain setup. SearchIQ adds: one license assigned per domain, index crawl triggered after each sync, SearchIQ widget JS embedded in the Gallery page template, field mapping configured in SearchIQ's dashboard. That's meaningful overhead for every new user provisioned.
+
+**When to revisit:** A user's gallery exceeds ~200 images and client-side filtering noticeably slows, OR a client specifically requests "site search" across pages and posts beyond just the gallery.
+
+**Implementation sketch:**
+1. After `configure-site` provisions the subsite, auto-install and configure SearchIQ on that subsite (requires SearchIQ REST API or manual step).
+2. Assign one of the AppSumo licenses to the domain.
+3. Trigger an initial crawl via SearchIQ API.
+4. Embed the SearchIQ widget JS in the `[pg_gallery]` shortcode output (or in the Gallery page template) alongside or replacing the chip cloud.
+5. Map `pg_gallery_image` fields: title → title, post_tag terms → facets, `_pg_image_url` → thumbnail.
+6. Keep `postglider/v1/search` endpoint as the data source SearchIQ crawls (it already returns SearchIQ-compatible JSON).
+
+**Two AppSumo licenses on hand:** 5,000 documents each, unlimited domains per license. Assign one domain per license; rotate for new deployments.
+
+---
+
 ## Backlog Protocol
 
 When performing future audits:
