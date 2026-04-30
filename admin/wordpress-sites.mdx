@@ -117,6 +117,66 @@ Every newly provisioned subsite has a working gallery at `/gallery/` in the nav 
 
 The `[pg_gallery]` shortcode (registered in `gallery.php`) queries `pg_gallery_image` CPT posts, renders a CSS grid from `_pg_image_url` meta, and shows WP tag names as figcaptions.
 
+## Subsite deprovisioning
+
+Use this when a slug needs to be freed for reprovisioning (e.g. business renamed, account cleaned up, or the original provisioning used the wrong slug and you need to start over).
+
+### Admin UI: Subsite Cleanup tab
+
+The deprovisioning tool lives in the PostGlider app at **Admin → Subsite Cleanup** (visible to `is_admin` users only).
+
+<Steps>
+  <Step title="Look up the user" icon="search">
+    Enter the user's email address and click **Look up**. The panel shows their tier and the active subsite slug, e.g. `stay-true-tattoo.mypostglider.website`.
+
+    If the field reads "No subsite provisioned — nothing to clean up," there is nothing to delete.
+  </Step>
+  <Step title="Delete the subsite" icon="trash">
+    Click **Delete Subsite**. A confirm dialog appears with the full subdomain and a warning that this is irreversible. Click **Yes, delete it**.
+
+    The operation calls `POST /api/admin/deprovision` → `deprovisionWpSubsite()`. On success the panel updates to show "No subsite provisioned."
+  </Step>
+  <Step title="Reprovision (if needed)" icon="refresh-cw">
+    To immediately provision a new subsite for the same user, trigger a new image tag (or call `provisionWpSubsite(userId)` directly). The slug will be re-derived from the current business name.
+
+    If the business name hasn't changed, you may need to update `business_profiles.name` before reprovisioning to get a different slug.
+  </Step>
+</Steps>
+
+### What deprovisioning does
+
+```mermaid
+sequenceDiagram
+    participant Admin as Admin UI
+    participant API as /api/admin/deprovision
+    participant WP as mypostglider.website
+    participant DB as Supabase
+
+    Admin->>API: POST { user_id }
+    API->>DB: profiles.wp_subsite_slug → get slug
+    API->>WP: DELETE /wp-json/postglider/v1/delete-site { domain }
+    Note over WP: get_blog_id_from_url(domain)<br/>wpmu_delete_blog(blog_id, drop_tables=true)<br/>Refuses to delete main site<br/>404 = already gone (treated as success)
+    WP-->>API: { ok, deleted_blog_id }
+    API->>DB: gallery_tokens DELETE WHERE user_id = …
+    API->>DB: profiles.wp_subsite_slug = null
+    API-->>Admin: { ok: true }
+```
+
+Three things happen atomically on the Supabase side after WP confirms deletion:
+- `gallery_tokens` row is deleted — the old token can no longer authenticate sync-image calls
+- `profiles.wp_subsite_slug` is nulled — future `provisionWpSubsite()` calls will create a fresh subsite
+- If the WP delete returns 404 (subsite already gone), the Supabase cleanup still runs — the call is idempotent
+
+<Callout kind="warning">
+  `wpmu_delete_blog($id, true)` drops all `wp_{blog_id}_*` tables. Every `pg_gallery_image` stub post, SearchIQ index entry, and blog option is permanently destroyed. There is no undo. Supabase Storage images are **not** affected — they remain in the user's media vault.
+</Callout>
+
+### When NOT to deprovision
+
+- **SearchIQ images showing placeholders** — not a subsite problem; see [SearchIQ setup](/admin/searchiq#per-client-searchiq-setup)
+- **Slug conflict on a new signup** — `create-site` is idempotent and returns the existing `blog_id` if the domain is already registered. Deprovisioning is only needed if you want to *reassign* a slug to a different user.
+- **User wants a fresh gallery** — delete individual `pg_gallery_image` posts, or run a backfill. Don't nuke the subsite.
+
 ## Key WordPress credentials
 
 | Credential | Env var | Notes |
