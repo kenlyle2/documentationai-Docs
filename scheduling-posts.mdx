@@ -1,12 +1,19 @@
 ---
 title: "Week Packs & Scheduling"
-description: "How Week Packs work, the Weekly Architect algorithm, and publishing through UploadPost."
+description: "How to plan a full week of content, use the Weekly Architect, and publish to your social channels."
 visibility: public
 ---
 
 ## What Is a Week Pack?
 
-A Week Pack is a 7-slot content calendar for a single week. Each slot holds one approved idea — concept, caption, and final image. Once a pack is assembled and images are finalized, you publish directly to social platforms.
+A Week Pack is a 7-slot content calendar for a single week. Each slot holds one approved idea — concept, caption, and final image. Once a pack is assembled and images are finalized, you publish it directly to your connected social channels.
+
+PostGlider gives you two ways to build a Week Pack:
+
+| Path | Best for |
+|---|---|
+| **Week Pack Generator** (Pilot Mode) | Starting fresh — generate 7 new ideas in one batch, guided by your content balance |
+| **Weekly Architect** (Pilot Mode) | Using what you have — assembles existing backlog ideas and vault images into a week |
 
 ## Pack Lifecycle
 
@@ -17,6 +24,29 @@ A Week Pack is a 7-slot content calendar for a single week. Each slot holds one 
 | `upgrading` | Final image generation in progress |
 | `ready_to_export` | All images finalized; ready to schedule |
 | `exported` | Published to social platforms |
+
+## Week Pack Generator
+
+When you click **Create My Week** in Pilot Mode, PostGlider builds your 7-slot plan before a single word is written. You review it, adjust anything, then confirm — and all 7 ideas are generated in one batch.
+
+<Steps>
+  <Step title="Select your themes" icon="tag">
+    Tick 1–5 Genie suggestion bubbles for the topics you want this week. PostGlider distributes them intelligently — with 3 bubbles selected you get roughly 2 posts per theme, plus one guaranteed promotional post.
+  </Step>
+  <Step title="Add photos from your vault (optional)" icon="image">
+    Select photos from your Media Vault. PostGlider assigns each photo to the slot whose theme best matches the image content, so your lawn-crew photo lands on the "meet the team" post, not the pricing promo.
+  </Step>
+  <Step title="Review your Week Plan" icon="calendar">
+    A 7-slot preview appears showing the day, content category, assigned photo, and editable direction for each post. The guaranteed promo slot is highlighted and falls mid-week (Thursday) by default.
+  </Step>
+  <Step title="Confirm and generate" icon="sparkles">
+    Click **Generate My Week**. All 7 ideas are generated in a single batch with no additional roundtrips needed.
+  </Step>
+</Steps>
+
+<Callout kind="tip">
+  The plan respects your **Content Balance**. If your recent posts have been heavy on promotions, PostGlider automatically shifts the week toward tips and community content to bring your mix back to the healthy 20/40/40 target.
+</Callout>
 
 ## Weekly Architect
 
@@ -73,11 +103,11 @@ Once a pack is assembled, you manage it from the `/packs` page:
 - **Draft images** — Generate quick draft images for any idea missing one (1 credit each)
 - **Upgrade to final** — Full Pilot Mode render for a single slot (8 credits)
 - **Reorder / delete** — Drag-and-drop slots
-- **Export** — Publish directly to social platforms via UploadPost
+- **Export** — Publish directly to your connected social channels
 
-## Publishing via UploadPost
+## Publishing to Social Channels
 
-When a pack reaches `ready_to_export`, connect your social accounts via a one-click UploadPost authorization. Supported platforms:
+When a pack reaches `ready_to_export`, publish to your connected social accounts. Connect or manage your accounts at **Settings → Social Channels**. Supported platforms:
 
 <Columns cols={3}>
   <Card title="Instagram" icon="instagram" horizontal="false">

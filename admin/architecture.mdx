@@ -26,7 +26,7 @@ All three repos share the same backend project. The WP repos are canonical sourc
 | Text generation | Large language model (planning, ideas, niche codes) |
 | Business enrichment | Enrichment API |
 | Email | Transactional email service |
-| Social publishing | UploadPost |
+| Social publishing | Postiz (shared org account, `POSTIZ_API_KEY`) |
 | WordPress search | SearchIQ |
 
 ## Key Environment Variables
@@ -83,6 +83,25 @@ Realtime listeners for image updates trigger XState events (`VARIANTS_ARRIVED`) 
 | Day signal | `day_signal` edge function (computed) | Genie, content balance |
 | Format signal | `format_signal` edge function (computed) | Genie suggestions |
 | Hashtag signal | `hashtag` edge function → `competitor_signals` | Genie hashtag recommendations |
+
+## Week Pack Generator — Technical Notes
+
+The Week Pack Generator is a pure client-side planning step that runs before any generation API call is made. No new backend or DB schema is involved.
+
+| File | Role |
+|---|---|
+| `lib/utils/weekPackPlanner.ts` | Pure function: `buildWeekPlan(bubbles, photos, recentIdeas, weekBatchSize) → WeekPlanSlot[]` |
+| `lib/utils/imageCoherence.ts` | Scores vault images against bubble labels via keyword overlap + category expansion map. No API call. |
+| `components/generate/WeekPackReview.tsx` | Modal UI: 7-slot review with editable directions, photo thumbnails, category badges |
+| `app/(app)/generate/page.tsx` | Intercepts the `handleGenerate` callback in Pilot Mode; shows `WeekPackReview` before sending `GENERATE` to the XState machine |
+
+**Distribution algorithm:** 1 promote slot is hard-reserved (Thursday, index 3). The remaining 6 slots are distributed proportionally across the user's selected Genie bubbles, weighted by each category's deficit against the 20/40/40 content balance target. An interleaving pass ensures the week isn't front-loaded with one theme.
+
+**Photo assignment:** The planner scores each vault photo against each slot's bubble label using `scoreImageForBubble()`, then assigns greedily (highest coherence score first, each photo used at most once).
+
+**Virality Engine stub:** Each `WeekPlanSlot` has a `viralityHint?: string` field. When the Virality Engine is integrated, it populates this field; the UI already renders it as a green "Virality boost" badge. No further schema or component changes needed at that point.
+
+**Social publishing (Postiz):** PostGlider operates one shared Postiz Team account. The `POSTIZ_API_KEY` environment variable (server-side only, never exposed to the browser) authenticates all calls to `https://api.postiz.com/public/v1`. Two Route Handlers proxy Postiz on behalf of authenticated users: `GET /api/postiz/connect?platform=<platform>` (returns an OAuth URL) and `GET /api/postiz/integrations` (returns the current integration list for snapshot/diff). Connected channels are stored in `postiz_connections` (Supabase, RLS-scoped to business profile owner).
 
 ## Pilot Mode Drip Gate
 
