@@ -180,6 +180,11 @@
                 "title": "Auto-Tagging & Quality Scoring",
                 "path": "admin/image-pipeline",
                 "icon": "tag"
+              },
+              {
+                "title": "GMB Scout & Story Enrichment",
+                "path": "admin/gmb-scout",
+                "icon": "map-pin"
               }
             ]
           },
