@@ -91,6 +91,10 @@ The user has content but no connected channel. This tour runs once an idea is sa
 
 Completion fires `social_connected = true`.
 
+## Hosting
+
+UserTour is self-hosted on **Railway** (not a VPS). The Railway service runs the UserTour instance; the Next.js app connects to it via the three env vars below.
+
 ## Environment variables
 
 | Variable | Purpose |
@@ -100,6 +104,8 @@ Completion fires `social_connected = true`.
 | `USERTOUR_API_KEY` | Bearer token for server-side `POST /v1/users` calls |
 | `SYNC_TRIGGER_SECRET` | Manual trigger auth for `/api/sync-cohorts` |
 | `CRON_SECRET` | Vercel Cron auth (shared with other cron routes) |
+
+All three UserTour vars are currently blank in `.env.local`. Both code paths are guarded with silent no-ops — no user-facing errors, no broken UI — but **no tours will show and no trait data accumulates** until the vars are filled in. Set them in Vercel env vars (and `.env.local` for local dev) to activate the full pipeline without any code changes.
 
 ## Key files
 
