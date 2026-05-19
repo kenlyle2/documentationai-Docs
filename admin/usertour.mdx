@@ -107,6 +107,197 @@ UserTour is self-hosted on **Railway** (not a VPS). The Railway service runs the
 
 All three UserTour vars are currently blank in `.env.local`. Both code paths are guarded with silent no-ops — no user-facing errors, no broken UI — but **no tours will show and no trait data accumulates** until the vars are filled in. Set them in Vercel env vars (and `.env.local` for local dev) to activate the full pipeline without any code changes.
 
+## Tour builder guide
+
+Step-by-step instructions for creating all three tours in the UserTour admin dashboard. Precise enough to follow by hand or drive with a browser-automation agent.
+
+### Prerequisites
+
+1. `NEXT_PUBLIC_USERTOUR_TOKEN`, `USERTOUR_API_URL`, and `USERTOUR_API_KEY` are set in Vercel and `.env.local`.
+2. You have admin credentials for your Railway-hosted UserTour instance.
+3. Log into the UserTour dashboard at your Railway URL before starting.
+
+---
+
+### Tour 1 — "Your First Real Post"
+
+**Create the flow**
+
+1. Click **Flows** in the left sidebar.
+2. Click **New flow**.
+3. Set name: `Your First Real Post`.
+4. Click **Save**.
+
+**Set the trigger**
+
+5. Open the **Trigger** tab.
+6. Click **Add condition**.
+7. Attribute: `first_idea_generated` · Operator: `is` · Value: `false`.
+8. Click **Save trigger**.
+
+**Step 1 of 4**
+
+9. Click **Add step** → **Tooltip**.
+10. Element selector: `[data-usertour="nav-create"]`
+11. Position: **Right**.
+12. Body copy: `This is where the magic happens — let's make your first post.`
+13. Button label: `Next`.
+
+**Step 2 of 4**
+
+14. Click **Add step** → **Tooltip**.
+15. Element selector: `[data-usertour="profile-selector"]`
+16. Position: **Bottom**.
+17. Body copy: `Your business is already loaded with your voice, audience, and industry.`
+18. Button label: `Next`.
+
+**Step 3 of 4**
+
+19. Click **Add step** → **Tooltip**.
+20. Element selector: `[data-usertour="generate-button"]`
+21. Position: **Bottom**.
+22. Body copy: `Hit Generate any time you need a post idea. Thirty seconds or less.`
+23. Button label: `Next`.
+
+**Step 4 of 4**
+
+24. Click **Add step** → **Tooltip**.
+25. Element selector: `[data-usertour="idea-save"]`
+26. Position: **Bottom**.
+27. Body copy: `Save this to your content library. You can schedule it from here.`
+28. Button label: `Done`.
+
+**Publish**
+
+29. Click **Publish flow**.
+
+---
+
+### Tour 2 — "Build Your Vault"
+
+**Create the flow**
+
+1. Click **Flows** → **New flow**.
+2. Set name: `Build Your Vault`.
+3. Click **Save**.
+
+**Set the trigger**
+
+4. Open the **Trigger** tab.
+5. Click **Add condition**.
+6. Attribute: `vault_has_images` · Operator: `is` · Value: `false`.
+7. Click **Add condition** again.
+8. Attribute: `first_idea_generated` · Operator: `is` · Value: `true`.
+9. Set condition logic to **All (AND)**.
+10. Under **Frequency**, set to **Show once**.
+11. Click **Save trigger**.
+
+**Step 1 of 4**
+
+12. Click **Add step** → **Tooltip**.
+13. Element selector: `[data-usertour="nav-vault"]`
+14. Position: **Right**.
+15. Body copy: `Posts with real photos perform 3× better. Your vault is empty — let's fix that.`
+16. Button label: `Next`.
+
+**Step 2 of 4**
+
+17. Click **Add step** → **Tooltip**.
+18. Element selector: `[data-usertour="vault-upload"]`
+19. Position: **Bottom**.
+20. Body copy: `Drop in a photo from your business — workspace, product, you, your team.`
+21. Button label: `Next`.
+
+**Step 3 of 4**
+
+22. Click **Add step** → **Tooltip**.
+23. Element selector: `[data-usertour="vault-describe"]`
+24. Position: **Top**.
+25. Body copy: `Tell PostGlider what's in this photo. The more detail, the better your captions.`
+26. Button label: `Next`.
+
+**Step 4 of 4**
+
+27. Click **Add step** → **Tooltip**.
+28. Element selector: `[data-usertour="vault-tags"]`
+29. Position: **Top**.
+30. Body copy: `PostGlider just read your photo — these tags go into every caption that uses this image.`
+31. Button label: `Done`.
+
+**Publish**
+
+32. Click **Publish flow**.
+
+---
+
+### Tour 3 — "Get Your Post Live"
+
+**Create the flow**
+
+1. Click **Flows** → **New flow**.
+2. Set name: `Get Your Post Live`.
+3. Click **Save**.
+
+**Set the trigger**
+
+4. Open the **Trigger** tab.
+5. Click **Add condition**.
+6. Attribute: `social_connected` · Operator: `is` · Value: `false`.
+7. Click **Add condition** again.
+8. Attribute: `first_idea_generated` · Operator: `is` · Value: `true`.
+9. Set condition logic to **All (AND)**.
+10. Under **Frequency**, set to **Show once**.
+11. Click **Save trigger**.
+
+**Step 1 of 4**
+
+12. Click **Add step** → **Tooltip**.
+13. Element selector: `[data-usertour="idea-schedule"]`
+14. Position: **Top**.
+15. Body copy: `Ready to publish? Let's connect your social account — takes about 30 seconds.`
+16. Button label: `Next`.
+
+**Step 2 of 4**
+
+17. Click **Add step** → **Tooltip**.
+18. Element selector: `[data-usertour="nav-connect-socials"]`
+19. Position: **Right**.
+20. Body copy: `PostGlider uses pre-approved connections — no Meta App Review, no setup headaches.`
+21. Button label: `Next`.
+
+**Step 3 of 4**
+
+22. Click **Add step** → **Tooltip**.
+23. Element selector: `[data-usertour="social-add-channel"]`
+24. Position: **Bottom**.
+25. Body copy: `Choose your platform and authorize PostGlider.`
+26. Button label: `Next`.
+
+**Step 4 of 4**
+
+27. Click **Add step** → **Tooltip**.
+28. *(No element selector — free-floating tooltip shown after OAuth redirect completes.)*
+29. Body copy: `Connected. Pick a time and PostGlider will post automatically.`
+30. Button label: `Done`.
+
+**Publish**
+
+31. Click **Publish flow**.
+
+---
+
+### Verify all three tours
+
+After publishing:
+
+- Open your PostGlider app as a test user with `first_idea_generated = false`, `vault_has_images = false`, `social_connected = false`.
+- Navigate to `/generate` — Tour 1 should trigger on the `nav-create` element.
+- Save an idea — `first_idea_generated` flips to `true` on the next page load, triggering Tour 2 if vault is still empty.
+- Navigate to `/gallery` — Tour 2 should trigger on `vault-upload`.
+- After uploading a photo, Tour 3 triggers when an idea card's schedule button is visible.
+
+To force-reset a tour for re-testing: open the UserTour dashboard → **Users** → find your test user → **Reset flow progress**.
+
 ## Key files
 
 | File | Role |
