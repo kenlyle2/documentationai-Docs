@@ -79,6 +79,32 @@ cd ~/projects/postglider2
 supabase functions deploy gallery-search
 ```
 
+---
+
+## Kilo Code Tooling
+
+### kilo+ Usage Examples
+
+Bare start — opens kilo in project mode, counter untouched
+```bash
+kilo+
+```
+
+Named feature — counter scoped to "auth-refactor"
+```bash
+kilo+ --feature auth-refactor
+```
+
+Named feature + kilo args
+```bash
+kilo+ --feature auth-refactor --model kilo/anthropic/claude-opus-4
+```
+
+Reset a feature counter manually
+```bash
+echo 0 > ~/.cache/kilo_plus/$(echo -n "/path/to/repo:auth-refactor" | md5sum | awk '{print $1}').count
+```
+
 **Push migrations:**
 ```bash
 cd ~/projects/postglider2
@@ -129,6 +155,32 @@ Header: Authorization: Bearer SERVICE_ROLE_KEY
     Install SearchIQ plugin on the subsite, enter the API key, and trigger an index crawl. See [SearchIQ & Image Sync](/admin/searchiq) for full steps.
   </Step>
 </Steps>
+
+---
+
+## Admin panel tabs
+
+The `/admin` panel is visible to `is_admin = true` accounts only.
+
+| Tab | Purpose |
+|---|---|
+| Mission Control | Live system health, recent generation activity, error log |
+| Tier Quotas | Adjust monthly credit limits per plan |
+| Defaults | System-wide defaults (see below) |
+| Loops test | Verify Loops.so API key and fire test events |
+| Ninjapipe webhook | Configure Butler week-ready notifications |
+| Bulk tag backlog | Trigger AI tagging sweep across all vault images |
+| User search | Look up any user account |
+
+## Admin defaults
+
+System-wide defaults are stored in `admin_settings` under the key `app_defaults` as a JSONB object.
+
+| Setting | Key | Default | Effect |
+|---|---|---|---|
+| Week batch size | `week_batch_size` | `7` | Default batch size on the Create Content page batch selector |
+
+Configurable via `/admin → Defaults tab`. Changes take effect on the next page load for all users.
 
 ---
 

@@ -145,6 +145,11 @@
                 "icon": "layout-dashboard"
               },
               {
+                "title": "User lifecycle diagram",
+                "path": "admin/user-lifecycle",
+                "icon": "git-branch"
+              },
+              {
                 "title": "Auth & Credits",
                 "path": "admin/auth-and-credits",
                 "icon": "shield"
@@ -206,6 +211,16 @@
                 "title": "Automated Testing",
                 "path": "admin/testing",
                 "icon": "check-square"
+              },
+              {
+                "title": "Demo Gun & sales handoff",
+                "path": "admin/demo",
+                "icon": "zap"
+              },
+              {
+                "title": "UserTour — onboarding tours",
+                "path": "admin/usertour",
+                "icon": "route"
               },
               {
                 "title": "Billing Injustice Report",

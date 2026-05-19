@@ -1,0 +1,113 @@
+---
+title: "UserTour — in-app onboarding tours"
+description: "How PostGlider's contextual walkthroughs are wired up — trait pipeline, data-usertour anchors, and the three planned tours."
+---
+
+## Why UserTour
+
+PostGlider is self-serve: users arrive at `/dashboard` after onboarding with a complete business profile but no muscle memory for the product. They have one generated idea (from the `/free-trial` flow) and an empty vault. The gap between "account created" and "first real value" is where churn happens.
+
+UserTour (self-hosted on Railway) lets us trigger contextual walkthroughs based on per-user traits — no code changes per tour, just rules in the UserTour dashboard. Traits are pushed in two ways:
+
+- **On every page load** — `UsertourProvider` (`app/providers/UsertourProvider.tsx`) calls `usertour.identify()` with live signals queried in `app/(app)/layout.tsx`.
+- **Nightly batch** — `GET /api/sync-cohorts` runs at 09:00 UTC via Vercel Cron. It calls `lib/user-signals.ts` to compute behavioral signals, fetches a recommended doc from Documentation.ai for stuck users, and pushes all traits via `lib/usertour-server.ts`.
+
+## Trait reference
+
+| Trait | Type | Meaning |
+|---|---|---|
+| `plan` | string | `free` / `pro` / `pro_plus` / `enterprise` |
+| `profile_complete` | bool | Has at least one business profile with name + industry |
+| `vault_has_images` | bool | `vault_image_count > 0` |
+| `first_idea_generated` | bool | `generated_ideas_count > 0` (dashboard-side) |
+| `social_connected` | bool | Any `postforme_connections` row exists |
+| `onboarding_complete` | bool | `profile_complete && first_idea_generated` |
+| `stuck_score` | float | 0.0–1.0 churn risk score (nightly) |
+| `last_intent` | string | `active` / `no_ideas_3d` / `low_publish_cadence` / `empty_vault` |
+| `signup_days_ago` | int | Days since account creation |
+| `recommended_doc_url` | string | Best-match help doc URL for stuck users |
+
+## Element anchors
+
+Anchors are placed as `data-usertour` attributes on interactive elements. Target them in the UserTour dashboard using the CSS selector `[data-usertour="<name>"]`.
+
+| Anchor | File | Element |
+|---|---|---|
+| `nav-create` | `components/sidebar.tsx` | "Create" nav link → `/generate` |
+| `nav-vault` | `components/sidebar.tsx` | "Media Vault" nav link → `/gallery` |
+| `nav-connect-socials` | `components/sidebar.tsx` | "Connect Socials" nav link → `/settings/social` |
+| `profile-selector` | `components/generate/GeneratorConfiguration.tsx` | Business profile `<select>` |
+| `generate-button` | `app/(app)/generate/page.tsx` | "Create My Batch" button |
+| `idea-save` | `components/generate/IdeaCard.tsx` | "Save to Library" button |
+| `idea-schedule` | `components/generate/IdeaCard.tsx` | "Schedule to Socials" button (visible after save) |
+| `vault-upload` | `app/(app)/gallery/page.tsx` | Upload `<label>` (wraps hidden file input) |
+| `vault-describe` | `components/gallery/ImageDetailsDialog.tsx` | Voice brief `<textarea>` |
+| `vault-tags` | `components/gallery/ImageDetailsDialog.tsx` | Tag cloud container |
+| `social-add-channel` | `app/(app)/settings/social/page.tsx` | "Add channel" header button |
+| `social-first-channel` | `app/(app)/settings/social/page.tsx` | "Add your first channel →" empty-state button |
+
+## Tour 1 — "Your First Real Post"
+
+**Trigger:** `first_idea_generated = false`
+
+Users arrive with a complete profile and one idea from `/free-trial`, but that idea was generated anonymously. This tour walks them through their first in-app Content Studio generation.
+
+| Step | Anchor | Copy guidance |
+|---|---|---|
+| 1 | `nav-create` | "This is where the magic happens — let's make your first post." |
+| 2 | `profile-selector` | "Your business is already loaded with your voice, audience, and industry." |
+| 3 | `generate-button` | "Hit Generate any time you need a post idea. Thirty seconds or less." |
+| 4 | `idea-save` | "Save this to your content library. You can schedule it from here." |
+
+Completion fires `first_idea_generated = true` and unlocks Tour 2.
+
+## Tour 2 — "Build Your Vault"
+
+**Trigger:** `vault_has_images = false`, fires after Tour 1 completes or on day 2+
+
+Posts with real business photos outperform text-only. The vault is empty at onboarding — this tour gets the first upload done.
+
+| Step | Anchor | Copy guidance |
+|---|---|---|
+| 1 | `nav-vault` | "Posts with real photos perform 3× better. Your vault is empty — let's fix that." |
+| 2 | `vault-upload` | "Drop in a photo from your business — workspace, product, you, your team." |
+| 3 | `vault-describe` | "Tell PostGlider what's in this photo. The more detail, the better your captions." |
+| 4 | `vault-tags` | "PostGlider just read your photo — these tags go into every caption that uses this image." |
+
+Completion fires `vault_has_images = true`.
+
+## Tour 3 — "Get Your Post Live"
+
+**Trigger:** `social_connected = false` AND `first_idea_generated = true`
+
+The user has content but no connected channel. This tour runs once an idea is saved and the Schedule button becomes visible on the idea card.
+
+| Step | Anchor | Copy guidance |
+|---|---|---|
+| 1 | `idea-schedule` | "Ready to publish? Let's connect your social account — takes about 30 seconds." |
+| 2 | `nav-connect-socials` | "PostGlider uses pre-approved connections — no Meta App Review, no setup headaches." |
+| 3 | `social-add-channel` | "Choose your platform and authorize PostGlider." |
+| 4 | *(post-OAuth)* | "Connected. Pick a time and PostGlider will post automatically." |
+
+Completion fires `social_connected = true`.
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_USERTOUR_TOKEN` | Client SDK token (`usertour.init()`) |
+| `USERTOUR_API_URL` | Self-hosted UserTour REST API base URL (Railway) |
+| `USERTOUR_API_KEY` | Bearer token for server-side `POST /v1/users` calls |
+| `SYNC_TRIGGER_SECRET` | Manual trigger auth for `/api/sync-cohorts` |
+| `CRON_SECRET` | Vercel Cron auth (shared with other cron routes) |
+
+## Key files
+
+| File | Role |
+|---|---|
+| `app/providers/UsertourProvider.tsx` | Client SDK init + `usertour.identify()` on every load |
+| `app/(app)/layout.tsx` | Queries DB signals, passes as props to `UsertourProvider` |
+| `lib/usertour-server.ts` | Server-side REST adapter for nightly trait pushes |
+| `lib/user-signals.ts` | Behavioral signal queries + `stuck_score` + `last_intent` |
+| `lib/docs-recommend.ts` | Fetches recommended doc URL from Documentation.ai for stuck users |
+| `app/api/sync-cohorts/route.ts` | Batch cron endpoint — computes and pushes all traits |
