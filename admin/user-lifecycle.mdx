@@ -1,57 +1,78 @@
 ---
 title: "User lifecycle diagram"
-description: "Full Mermaid flowchart of the PostGlider user journey — onboarding through publishing — plus drip gates and legend."
+description: "Full Mermaid flowchart of the PostGlider user journey — free-trial through publishing — plus drip gates and legend."
 ---
 
-> Audience: product team, QA, engineering, onboarding writers.
+> Audience: product team, QA, engineering, onboarding writers. Last updated: 2026-05-19.
 
 ```mermaid
 flowchart TD
     %% ─── ENTRY ───────────────────────────────────────────────────────────────
-    ENTRY([New visitor lands on /start])
+    ENTRY([New visitor lands on /free-trial])
 
-    %% ─── ONBOARDING ──────────────────────────────────────────────────────────
-    subgraph OB["🚀 /start — Onboarding (no account required)"]
+    %% ─── PHASE 1: FREE-TRIAL (anonymous session) ─────────────────────────────
+    subgraph FT["🚀 Phase 1 — /free-trial (anonymous Supabase session)"]
         direction TB
-        OB1[Step 1: Enter business website URL]
-        OB2[Outscraper enrichment runs in background\nbusiness name · location · services · review themes]
-        OB3{GMB listing found?}
-        OB4A[Show GMB confirmation card\nUser confirms 'that's me']
-        OB4B[User uploads workspace photo]
-        OB5A[AI scores GMB photos 1–5\nHigh-quality ones → Media Vault]
-        OB6[Step 3: Confirm / refine profile\nservices · audience · differentiator · brand tone]
-        OB7[Step 4: Generate first post\nAI caption + image]
-        OB7A{Person photo\nprovided?}
-        OB7B[Ideogram Remix with person reference\n5 credits]
-        OB7C[FAL Ideogram workspace-only\n3 credits]
-        OB8[User previews post — Save or Regenerate]
-        OB9[Step 5: Create account\nemail + password]
-        OB10[Session, profile, and first post preserved]
+        FT1{Do you have a website?}
+        FT2A[Enter URL → business-enrichment edge fn\nname · location · industry · tone · audience · services]
+        FT2B{Do you have a\nGoogle Business listing?}
+        FT3A[Enter business name + ZIP\n→ Places lookup]
+        FT3B[GMB confirmation card\n'That's my business']
+        FT4{Instagram handle?}
+        FT5[StepBusiness: name · location · industry]
+        FT6[StepProfileBuilder: service · audience · tone · differentiation]
+        FT7[StepConfirmation: confirm GMB photo or skip]
+        FT8[StepPhotoUpload: workspace · person · product\noptional — skip to generate without photos]
+        FT9[Generate: text + image in parallel\n1 credit text · 2–5 credits image]
+        FT10[RESULT: preview generated idea\nwatermarked demo image]
+        FT11{User decision}
+        FT12A[/pre-checkout — paid signup]
+        FT12B[Claim free account\nemail + password → anon session upgraded]
+    end
+
+    %% ─── PHASE 2: ONBOARDING (authenticated completion) ──────────────────────
+    subgraph OB["⚙️ Phase 2 — /onboarding (authenticated)"]
+        direction TB
+        OB1{Existing incomplete profile?\nfree-trial user with no tone/audience}
+        OB2A[Resume at Specialization\npre-filled from free-trial data]
+        OB2B[Fresh start: URL import or manual]
+        OB3[StepSpecialization: confirm NAICS/SIC niche code]
+        OB4[StepAudience: target audience + brand tone]
+        OB5[StepPitch: differentiation · service · customer result]
+        OB6[StepConfirmation: GMB photo\nqueues gmb_scout_jobs if confirmed]
+        OB7[StepReview: review + edit glossary terms\nconfirm → save profile]
     end
 
     %% ─── DASHBOARD ───────────────────────────────────────────────────────────
     DASH([Dashboard — home base])
 
+    %% ─── USERTOUR ────────────────────────────────────────────────────────────
+    subgraph UT["🗺️ UserTour — contextual walkthroughs (trait-triggered)"]
+        direction LR
+        UT1[Tour 1: first_idea_generated=false\n→ guide to Content Studio]
+        UT2[Tour 2: vault_has_images=false\n→ guide to Media Vault upload]
+        UT3[Tour 3: social_connected=false\n→ guide to Connect Socials]
+    end
+
     %% ─── VAULT ───────────────────────────────────────────────────────────────
     subgraph VAULT["🗂️ Media Vault — /gallery (ongoing, all tiers)"]
         direction TB
-        V1[Images arrive via GMB import,\nmanual upload, or generation]
-        V2[Gemini Vision auto-tags each image\nvisual tags + service tags]
-        V3[AI quality score assigned\nmarketing suitability 1–5]
+        V1[Images arrive via GMB scout,\nmanual upload, or AI generation]
+        V2[Gemini Vision auto-tags each image\nvisual tags + service tags + glossary match]
+        V3[Quality score assigned 1–10\nmarketing suitability]
         V4[Smart search: natural language\ne.g. 'rainy day photos · team shots']
-        V5[Bulk purge low-quality images\nfrom Tools page]
+        V5[Voice brief: describe image once\ninjected into every caption using that photo]
     end
 
     %% ─── GENERATE PAGE ───────────────────────────────────────────────────────
     subgraph GEN["✏️ Content Studio — /generate"]
         direction TB
-        GEN1[Select niche / content theme]
-        GEN2[Genie AI engine\nreads profile · reviews · balance · weather · day-of-week]
-        GEN3[4 tailored post angles suggested]
-        GEN4{User accepts suggestion\nor types own theme?}
-        GEN5[Theme confirmed → click Generate]
-        GEN6[Batch of text ideas generated\nconcept · caption · CTA · timing — 1 credit each]
-        GEN7[Tinder-style swipe review\nRight = save · Left = skip · Tap = edit inline]
+        GEN1[Select business profile]
+        GEN2[Genie AI engine\nreads profile · niche intelligence · balance · weather · day-of-week]
+        GEN3[Theme suggestions surfaced]
+        GEN4[Theme confirmed → click Generate]
+        GEN5[Batch of text ideas generated\nconcept · caption · CTA · timing — 1 credit each]
+        GEN6[Tinder-style swipe review\nRight = save · Left = skip · Tap = edit inline]
 
         subgraph PM["🛫 Passenger Mode — default path"]
             PM1[Saved idea ready for Quick Visual]
@@ -60,29 +81,30 @@ flowchart TD
         end
 
         subgraph PILOT_GATE["🔒 Pilot Mode gate"]
-            PG1{Account age ≥ 7 days\nAND tier = Pro+?}
+            PG1{pilot_eligible = true?\nAccount age ≥ 7 days AND Pro+}
             PG2[Locked — 'Unlock in N days']
         end
 
         subgraph PILOT["🎛️ Pilot Mode — Antigravity Drawer"]
-            PIL1[User sets preferences:\nshow drafts first · include text · identity strictness · style override]
+            PIL1[User sets preferences:\ndrafts first · identity strictness · style override]
             PIL2[Orchestrate Plan — GPT-4o agent\nreads post context · profile · vault photos · controls\n2 credits]
             PIL3[Plan summary shown\nprovider · quality · prompt · credit estimate]
             PIL4{User approves plan?}
             PIL5A[Explore stage:\n4 cheap drafts — gpt-image-1 medium\n1 credit each]
-            PIL5B[Final stage:\n1–2 premium images\nIdeogram v3 or OpenAI high-quality\n8 credits]
+            PIL5B[Final stage:\n1–2 premium images\nIdeogram v3 or OpenAI high\n8 credits]
             PIL5C[Identity-locked:\nIdeogram Remix with headshot\n8 credits]
             PIL6[FAL async — webhook delivers image\nbroadcast to activity feed]
             PIL7[User picks favorite final image]
         end
     end
 
-    %% ─── NICHE + DRIP ────────────────────────────────────────────────────────
-    subgraph NICHE["🏷️ Niche Classification (background, after enrichment)"]
+    %% ─── NICHE INTELLIGENCE ──────────────────────────────────────────────────
+    subgraph NICHE["🏷️ Niche & Service Intelligence (background)"]
         direction LR
-        NC1[GPT-4o-mini classifies NAICS + SIC codes]
-        NC2[User confirms codes in /settings]
-        NC3[Unlocks: precise competitor discovery\ndeeper content signals · niche_confirmed email]
+        NC1[Specialization code confirmed → classifyBusinessNiche]
+        NC2[generateNicheAssist: content angles + hooks per niche]
+        NC3[generateServiceIntelligence: per-service story + CTA]
+        NC4[Competitor Finder: NAICS/SIC → GMB + social signals\nnudges fed into Genie]
     end
 
     %% ─── BUTLER ──────────────────────────────────────────────────────────────
@@ -94,7 +116,7 @@ flowchart TD
         BUT4[Curation Drawer surfaces best pairs]
         BUT5[One tap: approve pair\nidea → 'approved' · slotted into active pack]
         BUT6{≥ 6 pairs for\na full week?}
-        BUT7[Week Ready notification\nvia Ninjapipe webhook]
+        BUT7[Week Ready notification]
     end
 
     %% ─── WEEKLY ARCHITECT ────────────────────────────────────────────────────
@@ -103,7 +125,7 @@ flowchart TD
         AR1[Scans backlog — skips seasonally irrelevant ideas]
         AR2[Scans vault with freshness scoring\noverused images deprioritized]
         AR3[Checks content balance\nPromote · Provide · Personalize mix]
-        AR4[Applies weather signals\nrain/heat prep for sensitive industries]
+        AR4[Applies weather signals\nrain/heat for sensitive industries]
         AR5[Fills gaps with gap_generate markers]
         AR6[Outputs 7-day WeekSlot plan]
         AR7[User reviews → clicks Assemble Pack]
@@ -118,22 +140,14 @@ flowchart TD
         WP4([Status: ready_for_upgrade])
         WP5[Upgrade to final — full Pilot render\n8 credits per idea]
         WP6([Status: upgrading → ready_to_export])
-        WP7[Export to UploadPost\nInstagram · Facebook · TikTok · YouTube · Twitter · LinkedIn]
+        WP7[Schedule via Postforme\nInstagram · Facebook · TikTok · YouTube · LinkedIn · X]
         WP8([Status: exported])
-    end
-
-    %% ─── COMPETITOR INTEL ────────────────────────────────────────────────────
-    subgraph COMP["🔍 Competitor Intelligence — /settings (background)"]
-        direction LR
-        CI1[Competitor Finder edge function\nNAICS/SIC → GMB data · website URLs · Predis.ai signals]
-        CI2[Content strategy nudges\nfeed into Genie angles]
     end
 
     %% ─── EMAIL LIFECYCLE ─────────────────────────────────────────────────────
     subgraph EMAIL["📧 Email Lifecycle — Loops.so (triggered automatically)"]
         direction LR
         EM1[profile_created → welcome sequence]
-        EM2[enrichment_complete → profile ready]
         EM3[first_post_generated → activation sequence]
         EM4[first_pack_created → engagement sequence]
         EM5[niche_confirmed → niche expert nurture]
@@ -141,37 +155,53 @@ flowchart TD
         EM7[subscription_downgraded → win-back]
     end
 
+    %% ─── USERTOUR SYNC ───────────────────────────────────────────────────────
+    subgraph UTSYNC["🔄 UserTour trait sync (nightly cron + every page load)"]
+        direction LR
+        UTS1[UsertourProvider: identify on every page load\nplan · profile_complete · vault_has_images · social_connected]
+        UTS2[sync-cohorts cron 09:00 UTC:\nstuck_score · last_intent · recommended_doc_url]
+    end
+
     %% ─── CREDIT SYSTEM ───────────────────────────────────────────────────────
     subgraph CREDITS["💳 Credits (reset monthly on billing anniversary)"]
         direction LR
         CR1[Free: 50/mo · Pro: varies · Pro+: 600/mo]
         CR2[Atomic deduction — SELECT FOR UPDATE\nprevents TOCTOU races]
-        CR3[Admin accounts: unlimited credits\ncapped at 999999 internally]
+        CR3[Admin: unlimited — capped at 999,999 internally]
     end
 
     %% ─── CONNECTIONS ─────────────────────────────────────────────────────────
-    ENTRY --> OB1
-    OB1 --> OB2
-    OB2 --> OB3
-    OB3 -->|Yes| OB4A --> OB5A --> OB6
-    OB3 -->|No| OB4B --> OB6
-    OB6 --> OB7 --> OB7A
-    OB7A -->|Person photo| OB7B --> OB8
-    OB7A -->|Workspace only| OB7C --> OB8
-    OB8 --> OB9 --> OB10 --> DASH
 
+    %% Free-trial phase
+    ENTRY --> FT1
+    FT1 -->|Yes — has website| FT2A --> FT3B
+    FT1 -->|No website| FT2B
+    FT2B -->|Yes — has GMB| FT3A --> FT3B
+    FT2B -->|No GMB| FT4
+    FT3B --> FT4
+    FT4 -->|Handle provided| FT5
+    FT4 -->|Skip| FT5
+    FT5 --> FT6 --> FT7 --> FT8 --> FT9 --> FT10 --> FT11
+    FT11 -->|Sign Up paid| FT12A
+    FT11 -->|Free trial| FT12B
+
+    %% Onboarding phase
+    FT12A --> OB1
+    FT12B --> OB1
+    OB1 -->|Free-trial user| OB2A --> OB3
+    OB1 -->|Direct signup| OB2B --> OB3
+    OB3 --> OB4 --> OB5 --> OB6 --> OB7 --> DASH
+
+    %% Dashboard → UserTour
+    DASH -.->|first session| UT
     DASH --> GEN1
     DASH --> VAULT
     DASH --> PACKS
     DASH -.->|background| NICHE
-    DASH -.->|background| COMP
 
-    GEN1 --> GEN2 --> GEN3 --> GEN4
-    GEN4 -->|Accepts| GEN5
-    GEN4 -->|Types own| GEN5
-    GEN5 --> GEN6 --> GEN7
-
-    GEN7 -->|Saved idea| PG1
+    %% Content Studio
+    GEN1 --> GEN2 --> GEN3 --> GEN4 --> GEN5 --> GEN6
+    GEN6 -->|Saved idea| PG1
     PG1 -->|No — Passenger| PM1 --> PM2 --> PM3 --> WP1
     PG1 -->|No — gate| PG2
     PG1 -->|Yes — Pilot| PIL1 --> PIL2 --> PIL3 --> PIL4
@@ -181,61 +211,88 @@ flowchart TD
     PIL5C --> PIL6
     PIL6 --> PIL7 --> WP1
 
+    %% Week Packs
     WP1 --> WP2 & BUT1 & AR1
     WP2 --> WP3 --> WP4 --> WP5 --> WP6 --> WP7 --> WP8
 
+    %% Butler
     BUT1 --> BUT2 --> BUT3 --> BUT4 --> BUT5 --> WP1
     BUT5 --> BUT6
     BUT6 -->|Yes| BUT7
 
+    %% Weekly Architect
     AR1 --> AR2 --> AR3 --> AR4 --> AR5 --> AR6 --> AR7 --> WP1
 
-    OB5A --> VAULT
+    %% Vault feeds
     PM3 -.->|image stored| VAULT
     PIL7 -.->|image stored| VAULT
     VAULT -.->|feeds| BUT1
     VAULT -.->|feeds| AR2
 
-    OB2 -.->|triggers| NICHE
-    NICHE -.->|feeds| COMP
-    COMP -.->|nudges| GEN2
+    %% GMB scout → Vault (async, fires from /onboarding)
+    OB6 -.->|queues gmb_scout_jobs| VAULT
 
-    OB10 -.->|fires| EM1
-    OB2 -.->|fires| EM2
-    GEN7 -.->|first save fires| EM3
+    %% Niche intelligence
+    OB3 -.->|triggers| NICHE
+    NICHE -.->|niche assist injects into| GEN2
+
+    %% Emails
+    OB7 -.->|fires profile_created| EM1
+    GEN6 -.->|first save fires| EM3
     WP1 -.->|first pack fires| EM4
-    NICHE -.->|confirmed fires| EM5
+    OB3 -.->|confirmed fires| EM5
 
-    GEN6 -.->|deducts| CREDITS
+    %% UserTour sync
+    DASH -.->| | UTSYNC
+
+    %% Credits
+    GEN5 -.->|deducts| CREDITS
     PM2 -.->|deducts| CREDITS
     PIL2 -.->|deducts| CREDITS
     PIL5A -.->|deducts| CREDITS
     PIL5B -.->|deducts| CREDITS
     WP3 -.->|deducts| CREDITS
     WP5 -.->|deducts| CREDITS
+    FT9 -.->|deducts| CREDITS
 
     classDef gate fill:#fef9c3,stroke:#ca8a04,color:#1c1917
     classDef locked fill:#fee2e2,stroke:#dc2626,color:#1c1917
     classDef terminal fill:#dcfce7,stroke:#16a34a,color:#1c1917
     classDef system fill:#eff6ff,stroke:#3b82f6,color:#1c1917
 
-    class PG1,OB3,OB7A,PIL4,BUT6 gate
+    class FT1,FT4,FT11,OB1,PG1,PIL4,BUT6 gate
     class PG2 locked
     class WP8,ENTRY terminal
-    class CREDITS,EMAIL system
+    class CREDITS,EMAIL,UTSYNC system
 ```
 
 ## Reading the diagram
 
 **Solid arrows (`→`)** — the primary user journey, in rough chronological order.
 
-**Dotted arrows (`-.->`)** — background or side-effect flows: images landing in the vault, credits being deducted, emails firing, Genie getting fed signals.
+**Dotted arrows (`-.->`)** — background or side-effect flows: images landing in the vault, credits being deducted, emails firing, niche intelligence feeding Genie.
 
-**Yellow nodes** — decision gates (account age, tier, plan approval).
+**Yellow nodes** — decision gates (website/GMB/Instagram choices, account age, Pilot eligibility, plan approval).
 
 **Red node** — hard lock ("Pilot Mode not yet available").
 
-**Green nodes** — terminal states (new visitor, pack exported).
+**Green nodes** — terminal states (new visitor entry, pack exported).
+
+**Blue subgraphs** — system/infrastructure concerns (Credits, Email, UserTour sync).
+
+## What changed from the original (April 2026)
+
+| Area | Old | New |
+|---|---|---|
+| Entry point | `/start` | `/free-trial` |
+| Onboarding structure | Single flow, anon → account | Two phases: `/free-trial` (anon) → `/onboarding` (authenticated) |
+| Data collection | Website → GMB → profile → generate | Website → GMB → Instagram → Business → Profile → Photo → Generate |
+| Account claim | Inline at end of `/start` | AUTH step → redirects to `/onboarding` for completion |
+| Specialization | Background only | Explicit `StepSpecialization` in `/onboarding` with NAICS/SIC picker |
+| Niche intelligence | Classification only | Full pipeline: `classifyBusinessNiche` + `generateNicheAssist` + `generateServiceIntelligence` |
+| Post-onboarding guidance | None | UserTour — 3 trait-triggered walkthroughs |
+| GMB photos | Scored + imported during onboarding | Queued via `gmb_scout_jobs` during `/onboarding`, imported async |
+| Publishing | UploadPost | Postforme (pre-approved OAuth, no Meta App Review) |
 
 ## Key drip gates
 
