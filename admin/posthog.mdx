@@ -1,0 +1,140 @@
+---
+title: "PostHog — Admin Guide"
+description: "How PostHog is used in PostGlider: session recordings, conversion funnels, and canary feature flags. What it is not used for."
+visibility: internal
+---
+
+## What PostHog is (and isn't) for in PostGlider
+
+PostHog is an **internal product analytics tool**. It helps the PostGlider team understand how the app is being used, where users drop off, and whether new features are working. It is **not** a user-facing reporting tool — users cannot log into PostHog to see their own data.
+
+**PostHog is used for:**
+- Session recordings
+- Conversion funnels
+- Feature flag management for canary rollouts
+
+**PostHog is not used for:**
+- User billing statements (those live in `/settings` → Credit Usage, backed by `credit_usage_log` and `image_gen_provenance`)
+- Replacing SQL queries (Supabase SQL Editor is authoritative for operational data)
+- User-facing analytics of any kind
+
+---
+
+## Setup
+
+PostHog is initialised in `app/providers/PostHogProvider.tsx`, which wraps the entire authenticated app layout. The client is configured with:
+
+```
+person_profiles: 'identified_only'   — only creates person profiles for users who have been identified
+capture_pageview: false              — pageviews are fired manually on route change, not automatically
+```
+
+Required environment variables:
+- `NEXT_PUBLIC_POSTHOG_KEY` — project API key from posthog.com
+- `NEXT_PUBLIC_POSTHOG_HOST` — defaults to `https://app.posthog.com`; set to your EU Cloud URL if needed
+
+All instrumentation calls go through `lib/analytics.ts`. **Never call `posthog.capture()` directly** — use `track()` or the typed helpers in `Analytics.*` so the event taxonomy stays consistent.
+
+---
+
+## 1. Session Recordings
+
+**What it shows:** A video replay of exactly what a real user did in the browser — mouse movements, clicks, scrolls, form fills, and rage-clicks. You can watch a user navigate from the Generate page to Settings without ever talking to them.
+
+**When to use it:**
+- A user reports confusion about a feature — watch their session instead of guessing
+- You shipped a UI change and want to see whether users notice the new element
+- You see a drop-off in a funnel step and want to understand what happens right before it
+
+**How to access:**
+1. posthog.com → your project → **Recordings** in the left nav
+2. Filter by URL path (e.g. `/generate`), date range, or user ID
+3. For a specific user complaint: go to **People** → find by email → open their profile → **Recordings** tab
+
+**Privacy note:** PostHog is configured with `person_profiles: 'identified_only'`, so only authenticated users who have been identified via `Analytics.identifyUser()` will have session recordings linked to their profile. Anonymous visitors are recorded but not linked.
+
+**Rage-click heatmaps** are also available under **Toolbar** → enable on the page you want to inspect.
+
+---
+
+## 2. Conversion Funnels
+
+**What it shows:** The percentage of users who complete each step of a multi-step flow. Each step is an event that fires in `lib/analytics.ts`. If step 2 has a 40% drop-off vs. step 1, that's where to look.
+
+**When to use it:**
+- "Are users who create an idea actually generating images?" — funnel from `idea_generated` → `image_uploaded` (or the image generation success event once instrumented)
+- "How many users who land on the Generate page produce at least one approved idea?" — funnel from `pageview /generate` → `idea_approved`
+- Measuring the impact of onboarding changes — compare funnel completion before and after a release
+
+**How to build a funnel:**
+1. posthog.com → **Insights** → **+ New insight** → select **Funnel**
+2. Add each step in order using the event names from `lib/analytics.ts`
+3. Set the conversion window (typically 7 or 14 days for this app)
+4. Break down by property if needed (e.g. `tier`, `profile_id`)
+
+**Key events already instrumented** (all in `lib/analytics.ts`):
+
+| Event | When it fires |
+|---|---|
+| `onboarding_step_completed` | Each step of the /start flow |
+| `onboarding_completed` | User finishes onboarding |
+| `profile_created` | New business profile saved |
+| `idea_generated` | Batch of ideas produced |
+| `idea_approved` | User taps approve on an idea |
+| `idea_skipped` | User skips an idea |
+| `pack_created` | Week pack assembled |
+| `pack_exported` | Pack exported to social queue |
+| `upgrade_clicked` | User taps upgrade CTA |
+| `social_connected` | GMB / Facebook / LinkedIn linked |
+
+**Adding new funnel events:** Add a typed helper to `Analytics` in `lib/analytics.ts`, call it at the right point in the code. Event names follow `noun_verb` convention (e.g. `image_generated`, `draft_upgraded`).
+
+---
+
+## 3. Feature Flags for Canary Rollouts
+
+**What it shows:** PostHog feature flags let you roll a new feature out to a percentage of users (or specific user segments) without touching code. This is more ergonomic than the current SHA-256 cohort gate (`lib/imagegen/cohortGate.ts`), which is hard-coded at 5% and requires a redeploy to change.
+
+**When to use it:** Any time you want to:
+- Ramp a feature from 5% → 20% → 100% without redeploying
+- A/B test two variants of a UI
+- Gate a feature to specific users (e.g. admins, pilot accounts) during QA
+
+**How to create a flag:**
+1. posthog.com → **Feature Flags** → **+ New feature flag**
+2. Give it a key (e.g. `imagegen-new-pipeline`)
+3. Set rollout percentage or add filter conditions (by user property, cohort, etc.)
+4. Save
+
+**How to read a flag in the app (client-side):**
+```typescript
+import { useFeatureFlagEnabled } from 'posthog-js/react';
+
+const isEnabled = useFeatureFlagEnabled('imagegen-new-pipeline');
+if (isEnabled) { /* new path */ }
+```
+
+**How to read a flag server-side (API routes / server actions):**
+```typescript
+import { PostHog } from 'posthog-node';
+
+const ph = new PostHog(process.env.NEXT_PUBLIC_POSTHOG_KEY!);
+const isEnabled = await ph.isFeatureEnabled('imagegen-new-pipeline', userId);
+await ph.shutdown();
+```
+
+**Relationship to the SHA-256 cohort gate:** The existing `cohortGate(userId)` in `lib/imagegen/cohortGate.ts` is a deterministic hash-based splitter controlled by the `IMAGEGEN_PILOT_PCT` environment variable. It was built before PostHog flags were considered. For new features, prefer PostHog flags — they're adjustable in real time without a redeploy. The existing cohort gate can be migrated to a PostHog flag once the imagegen canary graduates to 100%.
+
+---
+
+## What PostHog is explicitly not for
+
+| Use case | Right tool instead |
+|---|---|
+| User billing statement | `/settings` → Credit Usage (backed by `credit_usage_log`) |
+| Per-transaction image audit | `image_gen_provenance` table in Supabase |
+| Operational credit queries | Supabase SQL Editor |
+| User-visible spend reporting | Already built — see `/api/usage/credits` and `/api/usage/transactions` |
+| Error tracking | Vercel Functions logs + `app_errors` table |
+
+PostHog events add overhead (a network call per event). Only instrument events where the analytics question is worth the cost. The existing `Analytics.*` helpers cover the main product flows — add new events when you have a specific question to answer, not just to log everything.
