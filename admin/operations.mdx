@@ -188,6 +188,135 @@ The FACE_IDENTITY and PERSON_FOREGROUND routes (nano-banana-2-edit, i2i) have no
 
 ---
 
+## Video Generation — Operations
+
+### Architecture
+
+Video generation is fully async. The flow is:
+
+```
+User clicks Make Reel (or auto-trigger fires on Person in Scene)
+  → POST /api/generate/video
+      → execute-video edge function
+          → writes video_gen_provenance (status=submitted)
+          → stamps generated_ideas.video_submitted_at
+          → POST api.muapi.ai/{model} with webhook_url
+  → MuAPI processes (~55–180s depending on tier)
+      → POST muapi-webhook edge function
+          → downloads video from MuAPI CDN
+          → stores in Supabase Storage (generated-videos bucket)
+          → updates generated_ideas.video_url + video_status=completed
+          → updates video_gen_provenance with duration_ms + cost
+          → Realtime broadcast → UI shows "Your reel is ready!"
+```
+
+**Webhook failure fallback:** MuAPI webhooks are unreliable. If the webhook doesn't fire, the client polls `GET /api/video/status/{ideaId}` starting at `p50 × 0.75` of average duration, every 15s. The polling endpoint calls MuAPI's result endpoint directly and handles the full completion flow (download, store, update DB) if the webhook missed.
+
+### Video tiers and credit costs
+
+| Tier | Model | $/clip | Credits | Trigger |
+|---|---|---|---|---|
+| DRAFT | seedance-pro-i2v-fast | $0.10 | 10 | explicit only |
+| **DEFAULT** | **minimax-hailuo-02-standard-i2v** | **$0.15** | **15** | Make Reel button + Person in Scene auto-trigger |
+| PREMIUM | veo3.1-lite-image-to-video | $0.39 | 39 | explicit only |
+
+Costs live in `operation_pricing` (keys: `video_draft`, `video_default`, `video_premium`). Update via MCP or SQL if pricing changes — see [Pricing Intelligence](#pricing-intelligence) section.
+
+### Person in Video (auto-trigger)
+
+When a user has **Person in Scene** enabled on the generate page, Make Reel fires automatically as soon as the composite image arrives — no button press needed. The user sees "Generating your reel in the background…" immediately, then "Your reel is ready!" when done (~90s for DEFAULT).
+
+The reel uses the FACE_IDENTITY composite image (`image_url`) as input to minimax. The video appears on the idea card and on the packs page as soon as it completes — users can proceed to schedule/publish with the image immediately without waiting.
+
+### Provenance — tracking cost and duration
+
+Every video job writes two rows to `video_gen_provenance`:
+
+1. **submit** (`execute-video`): `status=submitted`, `submitted_at`, `muapi_request_id`
+2. **complete** (`muapi-webhook` or polling fallback): `status=completed|failed`, `completed_at`, `duration_ms`, `provider_cost_usd`
+
+**Check recent video jobs:**
+```sql
+SELECT idea_id, tier, model, status,
+       duration_ms, provider_cost_usd,
+       submitted_at, completed_at
+FROM video_gen_provenance
+ORDER BY submitted_at DESC
+LIMIT 20;
+```
+
+**Check real-world average durations (used to calibrate polling thresholds):**
+```sql
+SELECT model, tier, sample_count, avg_ms, p50_ms, p90_ms, avg_cost_usd
+FROM v_video_avg_duration;
+```
+
+Once `sample_count >= 3` per model, the client automatically uses real p50 values instead of hardcoded defaults (90s minimax, 55s seedance, 110s veo3.1-lite). No deployment needed — values are fetched from `/api/video/stats` at page load.
+
+**Check cost vs expected:**
+```sql
+SELECT model, tier,
+       ROUND(AVG(provider_cost_usd)::numeric, 4) AS avg_billed,
+       COUNT(*) AS count
+FROM video_gen_provenance
+WHERE status = 'completed'
+  AND submitted_at > now() - interval '7 days'
+GROUP BY model, tier;
+```
+
+MuAPI has raised video prices without notice (D014: seedance $0.06→$0.10, veo3.1-lite $0.30→$0.39). This query shows if billing has drifted from the `operation_pricing` credit costs. The daily pricing-watcher cron will surface these as `pricing_alerts`.
+
+### Diagnosing stuck videos
+
+A stuck video has `video_status = 'processing'` or `'pending'` longer than expected.
+
+**Find stale jobs:**
+```sql
+SELECT gi.id, gi.video_status, gi.video_request_id,
+       gi.video_submitted_at,
+       ROUND(EXTRACT(EPOCH FROM (now() - gi.video_submitted_at)) / 60) AS elapsed_min,
+       vp.model, vp.tier
+FROM generated_ideas gi
+LEFT JOIN video_gen_provenance vp ON vp.idea_id = gi.id
+WHERE gi.video_status IN ('processing', 'pending')
+  AND gi.video_submitted_at < now() - interval '10 minutes'
+ORDER BY gi.video_submitted_at ASC;
+```
+
+**Recover a stuck job manually** (hit the polling endpoint — it will call MuAPI and update DB if complete):
+```bash
+curl -H "Authorization: Bearer <user_access_token>" \
+  https://app.postglider.com/api/video/status/<idea_id>
+```
+
+**Mark a stuck job as failed** (frees the user to retry):
+```sql
+UPDATE generated_ideas
+SET video_status = 'failed'
+WHERE id = '<idea_id>'
+  AND video_status IN ('processing', 'pending');
+```
+
+### MuAPI webhook troubleshooting
+
+If a user reports their reel never arrived, check:
+
+```sql
+-- Did the webhook fire?
+SELECT id, video_status, video_url, video_submitted_at, video_request_id
+FROM generated_ideas
+WHERE id = '<idea_id>';
+
+-- Did provenance record a completion?
+SELECT status, duration_ms, provider_cost_usd, completed_at, error_message
+FROM video_gen_provenance
+WHERE idea_id = '<idea_id>';
+```
+
+If `video_gen_provenance.status = 'submitted'` but `generated_ideas.video_status = 'processing'` and > 10 minutes have elapsed — the webhook missed. Hit `/api/video/status/<idea_id>` with the user's token to recover, or manually fetch from MuAPI and update the DB.
+
+---
+
 ## Pricing Intelligence — Automated Market Price Watcher
 
 PostGlider runs a daily cron that compares current routing costs against market prices and raises alerts when cheaper quality-equivalent alternatives become available. This closes the loop on a systemic gap: leaderboard prices don't reflect what PostGlider actually pays (provider markup can be 2× market rate), and manual monitoring missed pricing changes for weeks.
