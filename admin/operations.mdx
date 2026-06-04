@@ -185,6 +185,115 @@ The FACE_IDENTITY and PERSON_FOREGROUND routes (nano-banana-2-edit, i2i) have no
 
 ---
 
+## Pricing Intelligence — Automated Market Price Watcher
+
+PostGlider runs a daily cron that compares current routing costs against market prices and raises alerts when cheaper quality-equivalent alternatives become available. This closes the loop on a systemic gap: leaderboard prices don't reflect what PostGlider actually pays (provider markup can be 2× market rate), and manual monitoring missed pricing changes for weeks.
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Migration** | `supabase/migrations/20260604001000_provider_pricing.sql` | `provider_pricing` table (daily snapshots) + `pricing_alerts` table (routing suggestions) |
+| **Cron endpoint** | `app/api/cron/pricing-watcher/route.ts` | Runs daily at 07:00 UTC. Fetches MuAPI live catalog, compares against reference prices, writes snapshots + alerts. |
+| **Manual script** | `scripts/pricing-watcher.cjs` | Same logic, runs locally. Dry-run by default. `--write` persists to Supabase. |
+| **vercel.json** | `vercel.json` | Cron registered at `0 7 * * *` (daily, runs after `refresh-route-pricing` at 06:00) |
+
+### How the watcher works
+
+1. Fetches live MuAPI catalog (`GET api.muapi.ai/api/v1/models`) — detects if MuAPI raises prices on models we use
+2. Merges live prices over hardcoded reference prices (Google AI direct, OpenAI direct, Replicate)
+3. For each active route, looks up known quality-validated alternatives
+4. Raises a `pricing_alerts` entry when savings exceed **15%** (below that, migration cost exceeds benefit at current volume)
+5. Quality-constrained routes (`FACE_IDENTITY`, `PERSON_FOREGROUND`) are skipped — no tested alternative exists (D008)
+
+### Current alerts the watcher will raise
+
+| Route | Current | Alternative | Savings | Status |
+|---|---|---|---|---|
+| GENERAL | MuAPI nano-banana-2 @ $0.12 | Google direct nano-banana-2 @ $0.067 | **44%** | Open — migration needed |
+| VIDEO_DEFAULT | MuAPI veo3.1-lite @ $0.30 | MuAPI grok-imagine-i2v @ $0.15 | **50%** | Open — benchmark pending |
+
+### The GENERAL route migration path ($0.12 → $0.067)
+
+MuAPI charges $0.12 for nano-banana-2 (Imagen 3). Google's own API charges $0.067 at 1K (1024×1024), or $0.034 in batch mode. Same model weights, no quality difference. To migrate:
+
+1. Add `GOOGLE_AI_API_KEY` env var (Vercel + `.env.local`)
+2. Add `GOOGLE_DIRECT` provider case to `supabase/functions/execute-image/`
+3. Update `IMAGE_ROUTING.GENERAL` in `lib/config/imageModels.ts` + mirror to `supabase/functions/_shared/imageModels.ts`
+4. Run `npx tsc --noEmit` + smoke test one generation
+5. Dismiss the open `pricing_alerts` entry for GENERAL after routing is changed
+
+Batch mode ($0.034) is also valid — PostGlider's pipeline is already async (Supabase Realtime). No user-facing change required.
+
+### Pricing context — market price ≠ what PostGlider pays
+
+Leaderboard sites (Artificial Analysis, Magic Hour) report the cheapest API price across all providers. Full pricing disambiguation: `research/Finding-Winning-Models.md`.
+
+| Model | Leaderboard "market" | MuAPI | Replicate | Google/OpenAI direct |
+|---|---|---|---|---|
+| nano-banana-2 | $0.07 | $0.12 | $0.15 | $0.067 (Google direct) |
+| gpt-image-2 high | $0.19 | **$0.09** (wholesale deal) | — | $0.190 |
+| gpt-image-2 medium | $0.042 | $0.045 | — | $0.042 |
+| gpt-image-2 low | $0.011 | $0.04 | — | **$0.011** |
+
+### Querying alerts
+
+**View open alerts:**
+```sql
+SELECT routing_key, current_provider, current_model, current_cost_usd,
+       alt_provider, alt_model, alt_cost_usd, savings_pct, quality_note,
+       created_at
+FROM pricing_alerts
+WHERE status = 'open'
+ORDER BY savings_pct DESC;
+```
+
+**Dismiss an alert (consciously skipping the savings):**
+```sql
+UPDATE pricing_alerts
+SET status = 'dismissed', updated_at = now()
+WHERE routing_key = 'GENERAL' AND alt_provider = 'GOOGLE_DIRECT';
+```
+
+**Mark actioned (routing was changed):**
+```sql
+UPDATE pricing_alerts
+SET status = 'actioned', updated_at = now()
+WHERE routing_key = 'GENERAL';
+```
+
+**View price history for a model (trend):**
+```sql
+SELECT fetched_at::date AS date, provider, model, quality_tier, cost_usd, price_source
+FROM provider_pricing
+WHERE model = 'nano-banana-2'
+ORDER BY fetched_at DESC
+LIMIT 30;
+```
+
+### Running manually
+
+```bash
+# Dry run — report only, no DB writes
+node scripts/pricing-watcher.cjs
+
+# Write snapshots + alerts to Supabase
+node scripts/pricing-watcher.cjs --write
+```
+
+### Keeping the watcher current
+
+The watcher's reference prices are hardcoded in two places that must stay in sync:
+- `scripts/pricing-watcher.cjs` — `REFERENCE_PRICES` constant
+- `app/api/cron/pricing-watcher/route.ts` — `REFERENCE_PRICES` constant
+
+Update both when:
+- A provider announces a price change
+- A new route is added to `IMAGE_ROUTING` or `VIDEO_ROUTING`
+- A benchmark closes an open quality constraint (e.g., a tested FACE_IDENTITY alternative)
+
+---
+
 ## Backend Admin API
 
 Operations requiring the service-role key:
