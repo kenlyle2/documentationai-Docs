@@ -1,6 +1,6 @@
 ---
 title: "Automated Testing"
-description: "Full test suite documentation: all 12 scripts, shared utilities, accounts, what they test, and chain reasoning."
+description: "Full test suite documentation: all 18 scripts, shared utilities, accounts, what they test, and chain reasoning."
 visibility: internal
 ---
 
@@ -16,7 +16,7 @@ rundev
 ### Running the Suite
 
 ```bash
-node scripts/run-all.cjs              # full suite — all 13 scripts in order
+node scripts/run-all.cjs              # full suite — all 17 scripts in order
 node scripts/run-all.cjs onboard      # only the four /start onboarding flows
 node scripts/run-all.cjs app          # only the six authenticated-user tests
 node scripts/run-all.cjs social       # only the three social-publishing tests
@@ -40,9 +40,15 @@ node scripts/run-all.cjs social       # only the three social-publishing tests
 | `app-04-mobile` | `kenlyle+2@gmail.com` (real) | Screenshots + pixel-diff regression of every main route at iPhone 390×844 |
 | `app-05-pricing-routing` | Anonymous | Routing redirects, login CTAs, free-trial landing, dynamic pricing webhook, IdeaCard field removal |
 | `app-06-network-resilience` | `kenlyle+2@gmail.com` (real) | Offline gap, reconnect, warning toast, duplicate generation prevention |
+| `app-08-billing-coverage` | `kenlyle+2@gmail.com` (real, admin) | Pricing public access, Pro Plus removal, Pro SKU display (PG-PRO-N), billing events tab visibility, extra posts pill, variable SKU webhook DB write |
+| `app-09-purchase-funnel` | `kenlyle+2@gmail.com` (real) / anonymous | `/sign-up` email capture form, known/unknown email routing, `POST /api/auth/pre-checkout` API contract, `/login?next=` redirect |
+| `app-12-butler-e2e` | `kenlyle+2@gmail.com` (real, landscaper, Pro tier) | 8-phase Butler backlog flow: seed ideas → score via `/api/butler/run` → banner visible in Pilot mode → open ButlerReviewSheet → swipe right (approve, DB asserted) → verify `butler_reasoning` → swipe left (skip, `butler_skip_count` + `butler_skip_until` DB asserted) |
+| `e2e-generate` | `kenlyle+2@gmail.com` (real, 2-profile) | Full week-pack generation E2E for all modes (pilot/passenger) × routes (trivial/mixed/edge/story/vault/edit-from-pack); profile auto-selection, Architect scan, TinderReview, pack assembly, PostforMe calendar verification |
+| `e2e-partial-week` | `kenlyle+2@gmail.com` (real) | Partial first-week onboarding: asserts Architect plan and pack item count ≤ days remaining in the current `week_starts_on`-aligned week; self-adjusts expected count by running day |
 | `social-01-fb-publish` | `kenlyle+2@gmail.com` (real) | End-to-end Facebook publish: generate idea, save, select page, publish, verify success badge |
 | `social-02-api-contract` | `kenlyle+2@gmail.com` (real) | Headless `fetch`-only contract tests for social publish endpoints: 401, 405, 422, response shape |
 | `social-03-token-health` | `kenlyle+2@gmail.com` (real) | Supabase-admin audit of OAuth token health: refresh_token presence, expiry windows, schema compatibility |
+| `billing-01-woo-webhook` | none (API-only) | WooCommerce webhook auth + contract: valid/invalid signature, SKU upgrade paths, `billing_events` DB write |
 
 **Self-cleaning:** all three `onboard-*` scripts delete the test user from `auth.users` at the end of every run via the admin API (try/finally, so cleanup runs even on failure). Requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`; skips gracefully if absent.
 
@@ -117,6 +123,8 @@ Retries up to 2 times on transient network errors (`ERR_CONNECTION_RESET`, `ERR_
 **`app-05-pricing-routing`** runs anonymously — no login required — verifying routing logic, pricing webhooks, and IdeaCard schema changes.
 
 **`app-06-network-resilience`** is the infrastructure stress-test. It validates the exact async interaction (frontend timeout ↔ Realtime subscription ↔ webhook arrival) that no other test covers. Runs last in the app group because it manipulates browser connectivity state and takes the longest.
+
+**`app-12-butler-e2e`** is the integration test for Butler — the AI backlog scoring agent. It runs after the core app tests because it depends on `kenlyle+2@gmail.com` having a Pro tier and existing `business_profiles` rows (verified by `app-01-ux` and `app-02-usage`). The 8-phase structure mirrors the user journey: seed data → score → UI surface → approve → skip. DB assertions via service role make the pass/fail binary — not subject to timing or UI rendering quirks.
 
 **`social-01-fb-publish` → `social-02-api-contract` → `social-03-token-health`** form the social-publishing validation stack:
 
@@ -485,7 +493,7 @@ Routing, pricing, and schema regression tests:
 
 | Test | What it checks |
 |---|---|
-| `/sign-up` redirect | Redirects to `/pre-checkout` |
+| `/sign-up` email form | URL stays at `/sign-up`, email input and submit button present (not a bare redirect) |
 | `/free-trial` loads | Returns 200, has a heading |
 | Login CTA | "Sign up" link navigates to `/pre-checkout` |
 | Pricing webhook | Dynamic pricing endpoint responds with correct schema |
@@ -615,6 +623,161 @@ Proactive OAuth token audit. Queries `social_connections` via the service role a
 <Callout kind="warning">
   Run this weekly in CI. A LinkedIn token expiring silently is the most common cause of "my posts stopped working" support tickets.
 </Callout>
+
+---
+
+### app-08-billing-coverage
+
+**Screenshots:** `/tmp/pg-billing-shots/`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear` (must be `is_admin = true` for Tests 3–5)
+
+Billing and pricing regression suite. 5 tests:
+
+| # | Test | What it checks |
+|---|---|---|
+| 1 | `/pricing` public access | Anonymous user can load `/pricing` without auth redirect |
+| 2 | Pro Plus removed | "Pro Plus" tier does not appear anywhere on the pricing page |
+| 3 | Pro SKU display | Authenticated Pro user sees `PG-PRO` or `PG-PRO-N` on the `/pricing` "current plan" button and the `/billing` plan badge |
+| 4 | Billing Events tab | Admin account sees the Billing Events tab; non-admin account does not |
+| 5 | Extra Posts teal pill | The extra posts remaining pill appears in the Create page header when credits > 0 |
+| 6 | Variable SKU webhook DB write | Creates a temp user, POSTs `{ product_sku: 'PG-PRO-3', status: 'active' }` to the `wpsubscription-webhook` edge function, then asserts `profiles.profiles_allowed=3`, `tier='pro'`, `billing_plan_key='pro'` in the database. Self-cleaning (try/finally delete). |
+
+**Credentials note:** Tests 3–5 require `ADMIN_PASSWORD` env var to be set. If absent, they are skipped with a clear message rather than failing. Test 6 requires `SUBSCRIPTION_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, and `NEXT_PUBLIC_SUPABASE_URL` in `.env.local`; skipped gracefully if absent.
+
+```bash
+ADMIN_PASSWORD=yourpassword node scripts/app-08-billing-coverage.cjs
+```
+
+---
+
+### app-09-purchase-funnel
+
+**Screenshots:** `/tmp/pg-funnel-shots/`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear` (Tests 2, 5); anonymous (Tests 1, 3, 4, 6)
+
+Purchase funnel routing and API tests. No generation waits — all 6 tests complete in < 45s.
+
+| # | Test | What it checks |
+|---|---|---|
+| 1 | `/sign-up` form renders | URL stays at `/sign-up`, email input present, submit button present, "free trial" fallback link present |
+| 2 | Known email routing | Known email → navigates to `/login?next=/pre-checkout`; `localStorage.pg_last_email` seeded |
+| 3 | Unknown email routing | Unknown email → navigates to `/free-trial` |
+| 4 | `POST /api/auth/pre-checkout` contract | Missing body → 400; known email → `{ hasAccount: true, wcCustomerId }` present; unknown email → `{ hasAccount: false }` |
+| 5 | `/login?next=` redirect | After login at `/login?next=/pre-checkout`, lands on `/pre-checkout` not `/dashboard` |
+| 6 | `/api/auth/claim` WC mirror | Creates anonymous session → calls claim → verifies `profiles.woocommerce_customer_id` set **and** the WooCommerce customer record has the same email (both DBs match). Self-cleaning. Skipped if Supabase or WC creds absent. |
+
+```bash
+node scripts/app-09-purchase-funnel.cjs
+```
+
+---
+
+### app-12-butler-e2e
+
+**Screenshots:** `/tmp/pg-butler-shots/`
+**Credentials:** `kenlyle+2@gmail.com` / `PgDev-9x4k-2026!` (Pro tier required — Butler is a Pro+ feature)
+**Viewport:** 1280×900 (desktop)
+
+Eight-phase end-to-end test for the Butler backlog scoring and review flow. Butler is the **fourth input source** into a generation batch alongside manual creative direction, Genie slots, and the Weekly Architect.
+
+| Phase | What it tests |
+|---|---|
+| 1 — Login | Navigates to `/generate` as the landscaper test account |
+| 2 — Seed backlog | Queries `generated_ideas` for `stage = 'backlog'`; inserts 3 landscaping ideas via service role if fewer than 3 exist (idempotent) |
+| 3 — Score | `POST /api/butler/run` with `weatherDescription: "Warm and dry this week — ideal outdoor conditions"`. Asserts `status 200`, `ideas.length > 0`, `butler_score > 0`. Logs top idea concept + reasoning excerpt. |
+| 4 — Banner | Reloads `/generate`, asserts Butler banner text "— review backlog suggestions" is visible (requires Pilot mode) |
+| 5 — Sheet open | Clicks banner, asserts ButlerReviewSheet opens with ≥ 1 idea card showing "Use this" button. Logs displayed concept and category badge. |
+| 6 — Approve | Clicks "Use this", asserts sheet closes, DB-confirms `stage = 'approved'` on the most-recently-updated idea |
+| 7 — Reasoning | Queries the approved idea for `butler_reasoning`; asserts non-null, logs weather-keyword matches (outdoor / season / spring / lawn / warm / dry) |
+| 8 — Skip | Reopens sheet, clicks "Skip", DB-confirms `butler_skip_count` incremented and `butler_skip_until` is 6–8 days from now |
+
+**Key assertions:**
+
+```
+butler_score > 0               (AI scored the idea)
+butler_reasoning != null       (GPT-4o-mini returned reasoning)
+stage = 'approved'             (right-swipe wrote to DB)
+butler_skip_count incremented  (left-swipe called increment_butler_skip RPC)
+butler_skip_until ≈ now + 7d  (resurface window set correctly)
+```
+
+**Dependencies checked:**
+
+- `profiles.tier` must be `'pro'` or higher — the route returns 403 for free tier
+- Dev server must be running on `localhost:3000`
+- `SUPABASE_SERVICE_ROLE_KEY` and `NEXT_PUBLIC_SUPABASE_URL` required in `.env.local` for seed + DB assertions
+
+```bash
+node scripts/app-12-butler-e2e.cjs --headed
+```
+
+---
+
+---
+
+## Image Generation Unit Tests (`imagegen-*`)
+
+These scripts test the image generation pipeline in isolation — no browser, no dev server required. Each runs in seconds and can be executed independently or as a pre-deploy gate.
+
+```bash
+node scripts/imagegen-01-sanitize.cjs       # PII stripping / truncation logic
+node scripts/imagegen-02-policy.cjs         # Policy rule priority, first-match, REJECT
+node scripts/imagegen-03-cohort.cjs         # Canary gate / cohort rollout logic
+node scripts/imagegen-04-normalize.cjs      # normalizeIntent signal-to-intent mapping
+node scripts/imagegen-05-fixtures.cjs       # Full routing fixture replay (10 scenarios)
+node scripts/imagegen-06-circuit-breaker.cjs  # Provider circuit state machine
+```
+
+| Script | What it tests |
+|---|---|
+| `imagegen-01-sanitize` | PII stripping (email, phone, card), prompt truncation at 1800 chars |
+| `imagegen-02-policy` | Rule priority ordering, first-match-wins, REJECT decisions, catch-all |
+| `imagegen-03-cohort` | Canary rollout gate: cohort assignment, percentage thresholds, determinism |
+| `imagegen-04-normalize` | `normalizeIntent()` signal mapping: identity_policy, text_required, is_equipment_trade |
+| `imagegen-05-fixtures` | 10 end-to-end routing scenarios asserting expected routing key per intent |
+| `imagegen-06-circuit-breaker` | `provider_circuit` state machine: closed/open/half-open logic + DB round-trips |
+
+### Layer 1 / Layer 2 test pattern
+
+All `imagegen-*` scripts follow a two-layer structure. Understanding this pattern makes the scripts faster to write and faster to debug.
+
+**Layer 1 — logic tests (no external dependencies)**
+
+The function under test is *inlined* into the script — copied from the source and run directly. No imports, no mocking, no network calls. These tests run in milliseconds and will pass even with no `.env.local` or internet connection.
+
+Why inline rather than import? The TS source lives in `lib/` and edge functions; the scripts are CommonJS. Inlining avoids a build step and keeps each script self-contained. If the inlined logic diverges from the source, that divergence is itself a signal to investigate.
+
+**Layer 2 — DB / integration tests (live Supabase)**
+
+These tests write to and read from the actual database via Supabase REST (using `SERVICE_ROLE_KEY`). They verify that the live schema matches what the logic assumes — column names, row existence, state round-trips.
+
+Layer 2 tests always:
+- Save the original DB state at the start
+- Restore it in a `finally`-equivalent at the end (safe to run against production)
+- Skip gracefully if `SERVICE_ROLE_KEY` is absent
+
+**Running only Layer 1:**
+
+```bash
+# Layer 1 tests print immediately; Layer 2 follows after DB calls
+# To run only logic tests, skip SERVICE_ROLE_KEY:
+NEXT_PUBLIC_SUPABASE_URL="" node scripts/imagegen-06-circuit-breaker.cjs
+```
+
+---
+
+## Known Gaps
+
+This table is updated whenever a billing, auth, or subscription change ships without corresponding test coverage. It is the authoritative list of what the test suite does **not** verify.
+
+| Gap | Affected script | What's missing | Introduced | Closed |
+|---|---|---|---|---|
+| `/sign-up` email capture form | `app-05-pricing-routing` | ~~Test asserts a redirect to `/pre-checkout`~~ | 2026-05-27 | 2026-05-27 (`app-05` Test 1 rewritten; full coverage in `app-09` Tests 1–3) |
+| `POST /api/auth/pre-checkout` | — | ~~New route had zero test coverage~~ | 2026-05-27 | 2026-05-27 (`app-09` Test 4) |
+| `/login?next=` redirect | `app-01-ux` | ~~No test covered `?next=` param behavior after login~~ | 2026-05-27 | 2026-05-27 (`app-09` Test 5) |
+| WC customer mirror on claim | — | ~~No test verified the DB write or that both DBs had matching records after claim~~ | 2026-05-27 | 2026-05-27 (`app-09` Test 6 — verifies `woocommerce_customer_id` in profiles **and** matching email on WC customer record) |
+| Variable SKU webhook DB write | `app-08-billing-coverage` | ~~Test 3 checks SKU display only (UI). No test sent a PG-PRO-3 payload through the webhook and asserted the DB write~~ | 2026-05-27 | 2026-05-27 (`app-08` Test 6) |
+| Butler backlog E2E | — | ~~No test covered Butler scoring, ButlerReviewSheet open/close, approve (stage DB write), or skip (RPC + skip_until)~~ | 2026-06-02 | 2026-06-02 (`app-12-butler-e2e` Phases 1–8) |
 
 ---
 
