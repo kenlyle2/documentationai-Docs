@@ -45,18 +45,20 @@ WHERE user_id = '<uuid>'
 LIMIT 10;
 ```
 
-**Check credit balance:**
+**Check credit balance and billing status:**
 ```sql
-SELECT credits_remaining, plan_tier
+SELECT usage_monthly, tier, billing_status, billing_plan_key,
+       profiles_allowed, woocommerce_customer_id
 FROM profiles
-WHERE id = '<uuid>';
+WHERE user_id = '<uuid>';
 ```
 
 **Find a user by email:**
 ```sql
-SELECT au.id, au.email, p.credits_remaining, p.plan_tier, p.pilot_eligible
+SELECT au.id, au.email, p.tier, p.billing_status, p.profiles_allowed,
+       p.woocommerce_customer_id, p.pilot_eligible
 FROM auth.users au
-JOIN profiles p ON p.id = au.id
+JOIN profiles p ON p.user_id = au.id
 WHERE au.email = 'user@example.com';
 ```
 
@@ -112,6 +114,74 @@ supabase db push
 ```
 
 **Deploy Next.js app:** Push to `main` — the hosting platform deploys automatically on every push to `main`.
+
+---
+
+## Image Generation — Provider Health & Circuit Breaker
+
+### Provider overview
+
+PostGlider routes image generation across three providers. Each was chosen for a specific reason:
+
+| Provider | Used for | Why |
+|---|---|---|
+| **MuAPI** | GENERAL (nano-banana-2), FACE_IDENTITY, PERSON_FOREGROUND | nano-banana-2 (Imagen 3) is AA t2i #3 (Elo 1261). MuAPI is ~20% cheaper than Replicate for nano-banana-2 ($0.12 vs ~$0.15 as of June 2026). They also offer interesting promos and $0.15 video generation (grok-imagine-i2v, AA #4 Elo 1078). |
+| **OpenAI direct** | UPGRADE, EXPLORE_TRADE | gpt-image-2 low at $0.011 — cheapest route with brand knowledge (equipment names). Medium at $0.042 for UPGRADE. |
+| **FAL** | WORKSPACE_REMIX, TEXT_HEAVY | Ideogram v3 — best text rendering, best remix quality from a reference photo. |
+
+### MuAPI relationship
+
+We want to like MuAPI. They are genuinely interesting — strong model catalog, competitive pricing on nano-banana-2, and unique video models at accessible price points. At $0.12/image for nano-banana-2, they're 20% cheaper than Replicate ($0.15) for the same underlying Imagen 3 model.
+
+However, MuAPI has demonstrated reliability issues that prevent treating them as a strategic partner:
+- Catalog entries that return 404 on POST (`bytedance-seedream-v5.0`, `google-imagen4` timeouts)
+- Silent breaking changes without notice (`aspect_ratio: "4:5"` dropped, `resolution: "4K"` casing changed)
+- 2.9/5 Trustpilot with a "fake model names" allegation (April 2026)
+
+**Policy:** Use MuAPI where they're the best option on price/quality. Do not add new MuAPI routes. Benchmark a replacement for `nano-banana-2-edit` (the last hard dependency) when time permits. Full assessment: `research/MuAPI_Strategic_Assessment.md`.
+
+### Circuit breaker — GENERAL route
+
+The GENERAL route (nano-banana-2 via MuAPI) has an automatic fallback to Replicate `google/imagen-3` (same underlying Imagen 3 model). State is stored in the `provider_circuit` table.
+
+**How it works:**
+- After **3 consecutive MuAPI failures**, the circuit opens
+- All subsequent images in the batch skip MuAPI and use Replicate transparently
+- After **10 minutes**, one probe request tries MuAPI again (half-open)
+- First success resets the circuit to closed
+
+**Check current circuit state:**
+```sql
+SELECT * FROM provider_circuit;
+```
+
+**Manually reset (if you've confirmed MuAPI is back):**
+```sql
+UPDATE provider_circuit
+SET circuit_open = false, consecutive_failures = 0
+WHERE provider = 'muapi_nb2';
+```
+
+**Force-open for testing (routes all GENERAL images to Replicate):**
+```sql
+UPDATE provider_circuit
+SET circuit_open = true, opened_at = now(), consecutive_failures = 3
+WHERE provider = 'muapi_nb2';
+```
+
+The FACE_IDENTITY and PERSON_FOREGROUND routes (nano-banana-2-edit, i2i) have no confirmed fallback provider — they fail cleanly with an error if MuAPI is down.
+
+### Current routing table (June 2026)
+
+| Route | Provider | Model | $/image | Trigger |
+|---|---|---|---|---|
+| GENERAL | MuAPI → Replicate fallback | nano-banana-2 → google/imagen-3 | $0.12 → $0.15 | Catch-all |
+| EXPLORE_TRADE | OpenAI direct | gpt-image-2 low | $0.011 | is_equipment_trade = true |
+| UPGRADE | OpenAI direct | gpt-image-2 medium | $0.042 | stage = UPGRADE |
+| FACE_IDENTITY | MuAPI | nano-banana-2-edit | $0.12 | identity_policy = FACE_PRESERVE |
+| PERSON_FOREGROUND | MuAPI | nano-banana-2-edit | $0.12 | identity_policy = PERSON_SAFE |
+| WORKSPACE_REMIX | FAL (Ideogram) | ideogram/v3/remix | — | has_source_image, no identity |
+| TEXT_HEAVY | FAL (Ideogram) | ideogram/v3 | — | text_required = true |
 
 ---
 
