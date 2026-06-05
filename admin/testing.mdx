@@ -16,10 +16,11 @@ rundev
 ### Running the Suite
 
 ```bash
-node scripts/run-all.cjs              # full suite — all 17 scripts in order
+node scripts/run-all.cjs              # full suite — all scripts in order
+node scripts/run-all.cjs imagegen     # only the image pipeline unit tests (no browser, no server)
 node scripts/run-all.cjs onboard      # only the four /start onboarding flows
-node scripts/run-all.cjs app          # only the six authenticated-user tests
-node scripts/run-all.cjs social       # only the three social-publishing tests
+node scripts/run-all.cjs app          # only the authenticated-user tests
+node scripts/run-all.cjs social       # only the social-publishing tests
 ```
 
 `run-all.cjs` runs scripts sequentially, streams each script's output live, and prints a grouped summary table with pass/fail and elapsed time at the end. Exit code is 1 if any script fails.
@@ -717,52 +718,263 @@ node scripts/app-12-butler-e2e.cjs --headed
 
 ## Image Generation Unit Tests (`imagegen-*`)
 
-These scripts test the image generation pipeline in isolation — no browser, no dev server required. Each runs in seconds and can be executed independently or as a pre-deploy gate.
+### What unit tests are, and why they exist alongside functional tests
+
+The functional tests (`app-*`, `onboard-*`, `e2e-*`) prove that the product works end-to-end — they click buttons, fill forms, and verify that images appear. They are the most intuitive tests to read because they mirror what a real user does.
+
+**Unit tests** are narrower. They test a single function in complete isolation — no browser, no network, no database. The goal is to verify that a piece of logic produces the right answer given a specific input, without any of the surrounding infrastructure.
+
+For PostGlider's image generation pipeline specifically, unit tests matter because the routing decisions (which model, which provider, which price tier) are pure logic — they are deterministic calculations over a small set of fields. A functional test can confirm that an image was generated, but it cannot efficiently check all the edge cases: what happens when a landscaping business gets combined with a face-identity request? What if the equipment brand name is already in the prompt? A unit test checks each of these scenarios in milliseconds, with zero API cost.
+
+The seven `imagegen-*` scripts form a **test pyramid** — the base layer (01–06) tests logic, the middle layer (07) tests the boundary between our code and an external API, and the functional tests above verify the full user journey.
+
+---
+
+### Running the imagegen suite
+
+No dev server required. These scripts run anywhere Node.js is installed.
 
 ```bash
-node scripts/imagegen-01-sanitize.cjs       # PII stripping / truncation logic
-node scripts/imagegen-02-policy.cjs         # Policy rule priority, first-match, REJECT
-node scripts/imagegen-03-cohort.cjs         # Canary gate / cohort rollout logic
-node scripts/imagegen-04-normalize.cjs      # normalizeIntent signal-to-intent mapping
-node scripts/imagegen-05-fixtures.cjs       # Full routing fixture replay (10 scenarios)
-node scripts/imagegen-06-circuit-breaker.cjs  # Provider circuit state machine
+node scripts/run-all.cjs imagegen          # all seven scripts in order (~5 seconds total)
+
+# Or individually:
+node scripts/imagegen-01-sanitize.cjs
+node scripts/imagegen-02-policy.cjs
+node scripts/imagegen-03-cohort.cjs
+node scripts/imagegen-04-normalize.cjs
+node scripts/imagegen-05-fixtures.cjs
+node scripts/imagegen-06-circuit-breaker.cjs
+node scripts/imagegen-07-composite.cjs
 ```
 
 | Script | What it tests |
 |---|---|
-| `imagegen-01-sanitize` | PII stripping (email, phone, card), prompt truncation at 1800 chars |
-| `imagegen-02-policy` | Rule priority ordering, first-match-wins, REJECT decisions, catch-all |
-| `imagegen-03-cohort` | Canary rollout gate: cohort assignment, percentage thresholds, determinism |
-| `imagegen-04-normalize` | `normalizeIntent()` signal mapping: identity_policy, text_required, is_equipment_trade |
-| `imagegen-05-fixtures` | 10 end-to-end routing scenarios asserting expected routing key per intent |
-| `imagegen-06-circuit-breaker` | `provider_circuit` state machine: closed/open/half-open logic + DB round-trips |
+| `imagegen-01-sanitize` | PII stripping (email, phone, credit card) and prompt truncation at 1800 characters |
+| `imagegen-02-policy` | Routing rule priority, first-match-wins behavior, REJECT decisions, equipment-trade route, catch-all |
+| `imagegen-03-cohort` | Canary rollout gate: cohort assignment, percentage thresholds, and determinism |
+| `imagegen-04-normalize` | `normalizeIntent()` signal-to-intent mapping: identity policy, equipment-trade derivation, brand name injection |
+| `imagegen-05-fixtures` | 15 end-to-end routing scenarios — each confirms the full `normalizeIntent → policyEngine` pipeline produces the expected routing decision |
+| `imagegen-06-circuit-breaker` | `provider_circuit` state machine: closed/open/half-open logic and database round-trips |
+| `imagegen-07-composite` | Google Gemini adapter for identity composites — HTTP mock tests that cover response parsing, error paths, and request shape |
+
+---
 
 ### Layer 1 / Layer 2 test pattern
 
-All `imagegen-*` scripts follow a two-layer structure. Understanding this pattern makes the scripts faster to write and faster to debug.
+All `imagegen-*` scripts follow a two-layer structure.
 
-**Layer 1 — logic tests (no external dependencies)**
+**Layer 1 — pure logic (no external dependencies)**
 
-The function under test is *inlined* into the script — copied from the source and run directly. No imports, no mocking, no network calls. These tests run in milliseconds and will pass even with no `.env.local` or internet connection.
+The function under test is *inlined* into the script — meaning the logic is copied directly from the TypeScript source into the test file and run as plain JavaScript. No imports, no network calls, no database. These tests run in milliseconds and pass even with no `.env.local` or internet connection.
 
-Why inline rather than import? The TS source lives in `lib/` and edge functions; the scripts are CommonJS. Inlining avoids a build step and keeps each script self-contained. If the inlined logic diverges from the source, that divergence is itself a signal to investigate.
+Why inline rather than import? The TypeScript source lives in `lib/` and edge functions; the test scripts are CommonJS (a different JavaScript module format). Inlining avoids a build step and keeps each script self-contained.
 
-**Layer 2 — DB / integration tests (live Supabase)**
+**Layer 2 — database / integration (live Supabase)**
 
-These tests write to and read from the actual database via Supabase REST (using `SERVICE_ROLE_KEY`). They verify that the live schema matches what the logic assumes — column names, row existence, state round-trips.
+These tests write to and read from the actual database via Supabase REST. They verify that the live schema matches what the logic assumes — column names, row existence, state round-trips.
 
 Layer 2 tests always:
-- Save the original DB state at the start
-- Restore it in a `finally`-equivalent at the end (safe to run against production)
-- Skip gracefully if `SERVICE_ROLE_KEY` is absent
-
-**Running only Layer 1:**
+- Save the original database state at the start
+- Restore it at the end (a `finally` block — code that runs whether the test passes or fails)
+- Skip gracefully if `SERVICE_ROLE_KEY` is absent from `.env.local`
 
 ```bash
-# Layer 1 tests print immediately; Layer 2 follows after DB calls
-# To run only logic tests, skip SERVICE_ROLE_KEY:
+# To run only Layer 1 logic tests (skip the DB round-trips):
 NEXT_PUBLIC_SUPABASE_URL="" node scripts/imagegen-06-circuit-breaker.cjs
 ```
+
+---
+
+### The sync-guard pattern
+
+A key risk with inlined tests is **drift** — the production code changes but the test's inlined copy is not updated. The test keeps passing while the real code has a different behavior.
+
+`imagegen-02` and `imagegen-05` solve this with a **sync-guard**: a test that runs first and reads `lib/config/imageGenPolicy.ts` as a text file, then asserts that every rule ID in the source file is present in the test's inlined copy, and vice versa. If anyone adds a new routing rule in production without updating the test, the sync-guard test fails immediately.
+
+```
+PASS  SYNC-GUARD: inlined rule IDs match lib/config/imageGenPolicy.ts
+```
+
+If this test fails, it means the inlined `POLICY_RULES` array in the test script is out of sync with the production source. Update it before continuing.
+
+---
+
+### imagegen-01-sanitize
+
+Tests the PII (Personally Identifiable Information — emails, phone numbers, credit card numbers) stripping function that runs on every prompt before it is sent to any AI provider. Verifies:
+
+- Email addresses are replaced with `[REDACTED]`
+- Phone numbers in US formats are replaced with `[REDACTED]`
+- 16-digit card numbers are replaced with `[REDACTED]`
+- Prompts longer than 1,800 characters are truncated
+- Normal prompts pass through unchanged
+
+---
+
+### imagegen-02-policy
+
+Tests the policy engine — the function that looks at an image generation request and decides which routing rule applies. Rules are sorted by priority; the highest-priority matching rule wins.
+
+The current production rules, in priority order:
+
+| Rule ID | Priority | When it fires | Result |
+|---|---|---|---|
+| `rule-ssrf-block` | 1000 | URL failed allowlist validation | REJECT |
+| `rule-upgrade-free-tier` | 900 | UPGRADE stage + free account | REJECT |
+| `rule-face-preserve` | 800 | Face identity requested | → FACE_IDENTITY |
+| `rule-upgrade` | 700 | Explicit quality upgrade | → UPGRADE |
+| `rule-text-heavy` | 600 | Text must be legible in image | → TEXT_HEAVY |
+| `rule-workspace-remix` | 550 | Source image provided, no face | → WORKSPACE_REMIX |
+| `rule-person-safe` | 500 | Person in scene, no face reference | → PERSON_FOREGROUND |
+| `rule-explore-trade` | 50 | Equipment-trade business | → EXPLORE_TRADE |
+| `rule-default-general` | 0 | Everything else (catch-all) | → GENERAL |
+
+A **catch-all rule** is one with no conditions (`when: []`) — it matches every request. It must always exist and have the lowest priority so it only fires when nothing more specific matched.
+
+The test also verifies that `matched_rule_ids` records *all* matching rules, not just the winner. This powers the audit trail in `image_gen_provenance` — you can see why a generation routed a particular way even after the fact.
+
+**Key new tests added (2026-06-05):**
+- `is_equipment_trade=true → EXPLORE_TRADE` — the equipment-trade route was missing from this test entirely. A landscaping or HVAC business would have silently fallen through to the old catch-all.
+- `is_equipment_trade=false → GENERAL` — confirms the false value (explicit DB override) is respected and does not trigger EXPLORE_TRADE.
+- `is_equipment_trade=true + FACE_PRESERVE → FACE_IDENTITY wins` — confirms that a landscaper with a face reference still gets the identity composite route (priority 800 beats priority 50).
+- Catch-all renamed from `rule-default-explore` (→ `EXPLORE`) to `rule-default-general` (→ `GENERAL`). The old name referred to a route key that no longer exists in production.
+
+---
+
+### imagegen-03-cohort
+
+Tests the **canary gate** — the function that decides whether a given user should be in the `pilot` cohort (5% who see new features first) or the `control` cohort (everyone else). Verifies that:
+
+- The same user ID always gets the same cohort (deterministic — *deterministic* means the same input always produces the same output, with no randomness)
+- 5% of a large population falls in `pilot`
+- 95% falls in `control`
+- The percentage split is stable across repeated calls
+
+---
+
+### imagegen-04-normalize
+
+Tests `normalizeIntent()` — the function that translates raw UI signals (what the user clicked, what their business profile says) into a structured `ImageGenIntent` object that the policy engine and routing layer consume.
+
+**What it maps:**
+- `userControls.use_profile_faces = true` → `identity_policy: 'FACE_PRESERVE'`
+- `userControls.identity_strictness = 'STRICT'` → `identity_policy: 'PERSON_SAFE'`
+- Storage URLs → object keys (strips the CDN prefix to get the storage path)
+- Non-storage URLs → throws `SSRF_BLOCKED` (SSRF — Server-Side Request Forgery — is an attack where a server is tricked into fetching an attacker-controlled URL)
+
+**New tests added (2026-06-05) — equipment-trade derivation:**
+
+The `is_equipment_trade` field determines whether a business should use gpt-image-2 (brand knowledge, better for Toro mowers and DeWalt tools) versus nano-banana-2 (better scene quality for everything else). The derivation has two paths:
+
+1. **DB-cached value** — `business_profiles.is_equipment_trade` was set when the profile was created or classified. This is preferred and trusted directly.
+2. **Regex fallback** — if the DB value is `null` (unclassified profile, or a request built from a legacy code path), the function tests the `industry` text string against a pattern that matches landscaping, HVAC, plumbing, roofing, electrical, auto repair, and related trades.
+
+Tests verify both paths and the edge cases:
+- `is_equipment_trade: false` (explicit DB value) is respected even if the `industry` field looks like a trade — the DB is the authority
+- `is_equipment_trade: null` + `industry: 'lawn care and landscaping'` → regex fires → `true`
+- `is_equipment_trade: undefined` (no field at all) behaves the same as `null`
+
+**New tests — `enrichTradePrompt` injection:**
+
+When `is_equipment_trade` is true and the business profile has `equipment_names` (a list like `['Toro ProCore 648', 'Husqvarna Z246']` generated from the owner's equipment photos), the function appends the primary equipment name to the prompt. This activates gpt-image-2's brand recall — if the prompt says "featuring a Toro ProCore 648," the model renders that specific machine rather than a generic green mower.
+
+- **No-op** (a term for "does nothing / returns without changing anything") cases verified:
+  - Brand name already in the prompt → no duplicate injection
+  - `equipment_names` is an empty list → prompt unchanged
+  - `is_equipment_trade` is false → `enrichTradePrompt` is never called, even if names are present
+
+---
+
+### imagegen-05-fixtures
+
+A **fixture** test is one where you define a set of inputs and expected outputs upfront, then run the full pipeline against each one and confirm the output matches. Think of it as a truth table for the routing engine.
+
+This script runs 15 scenarios through the complete `normalizeIntent → policyEngine` pipeline and asserts the expected routing key for each:
+
+| Fixture | Scenario | Expected route |
+|---|---|---|
+| f01 | Simple explore, no identity, no text | GENERAL |
+| f02 | Text must appear in image | TEXT_HEAVY |
+| f03 | Person in scene, no face reference | PERSON_FOREGROUND |
+| f04 | Owner face reference provided | FACE_IDENTITY |
+| f05 | Explicit quality upgrade, Pro account | UPGRADE |
+| f06 | Quality upgrade, free account | REJECT |
+| f07 | Face reference + text required | FACE_IDENTITY (higher priority wins) |
+| f08 | `use_profile_faces` control set | FACE_IDENTITY |
+| f09 | Quality upgrade, starter account | UPGRADE |
+| f10 | Zero credit balance | GENERAL (credit gate is elsewhere) |
+| f11 | Source image provided, no face | WORKSPACE_REMIX |
+| f12 | Equipment-trade business (DB-cached) | EXPLORE_TRADE |
+| f13 | Equipment-trade via industry text (regex fallback) | EXPLORE_TRADE |
+| f14 | Equipment-trade + face reference | FACE_IDENTITY (priority 800 > 50) |
+
+**Why f01 and f10 changed:** These fixtures previously expected `EXPLORE` (the old catch-all route key). The production catch-all was renamed to `GENERAL` when nano-banana-2 via MuAPI replaced the previous default provider. The test was asserting a route that no longer exists — it was passing against the stale inlined rules but would have produced the wrong model in production.
+
+**Fixtures f12 and f13 are new.** Before 2026-06-05, the EXPLORE_TRADE route — responsible for routing landscapers, HVAC technicians, roofers, and plumbers to gpt-image-2 (which knows real equipment brand names) — had zero routing fixture coverage. If the `rule-explore-trade` rule was accidentally removed or its priority changed, no test would catch it.
+
+---
+
+### imagegen-06-circuit-breaker
+
+Tests the `provider_circuit` state machine — the mechanism that temporarily stops sending requests to an AI provider that has been failing, rather than hammering a broken endpoint indefinitely.
+
+The three states:
+- **Closed** — normal operation, requests go through
+- **Open** — provider is failing; all requests are rejected immediately without attempting a real API call (this prevents a slow timeout on every generation attempt while a provider is down)
+- **Half-open** — a trial period after the circuit has been open; one test request is allowed through to see if the provider has recovered
+
+The script tests the state transitions and boundary conditions (e.g., exactly 10 minutes in the open state vs. 9 minutes 59 seconds) using both inlined logic (Layer 1) and live database round-trips (Layer 2) to confirm the state is read and written correctly.
+
+---
+
+### imagegen-07-composite
+
+Tests `personInSceneComposite()` — the function that calls Google Gemini to produce an identity-preserving composite image (person's face from a headshot placed into a scene image). This is the core of the D016 architecture: Google Gemini direct at $0.067/image vs. MuAPI at $0.12.
+
+**Why this test exists:** In June 2026, the D017 benchmark revealed that this function had two bugs that caused every identity composite via the Google provider path to silently fail since D016 deployed:
+1. Invalid `generationConfig` fields in the request body caused a 400 error
+2. A mismatch between camelCase (`inlineData`) and snake_case (`inline_data`) in the response parser meant the image data was never extracted even on successful responses
+
+Neither bug produced a visible error message — the function simply never returned an image. There was no test to catch it.
+
+**How the test works — HTTP mocking:**
+
+A **mock** is a fake replacement for an external dependency. Instead of calling the real Google Gemini API (which would require an API key, cost money, and take several seconds), the test supplies a fake `fetch` function that returns pre-built responses. The function under test never knows the difference — it calls `fetch()` and receives a valid-looking response.
+
+This means the tests run in milliseconds, cost nothing, and work with no API key or internet connection. They are testing that our code handles Gemini's responses correctly, not that Gemini itself works.
+
+**What the tests cover:**
+
+| Test | What it verifies |
+|---|---|
+| camelCase `inlineData` response | The normal Gemini API format is parsed correctly and returns `{ imageBase64, mimeType: 'image/png' }` |
+| snake_case `inline_data` response | The fallback format (for API version changes) is also handled |
+| Non-200 response | Error includes the HTTP status code and response body |
+| Response with no image part | Throws a clear "Gemini: no image in response" error (rather than a cryptic `undefined` crash) |
+| Image download failure | Throws with the URL and HTTP status when a scene/headshot image can't be fetched |
+| Request hits correct endpoint | Asserts the Gemini endpoint URL and `x-goog-api-key` header are set correctly |
+| Guardrail text ordering | The face-quality guardrail ("eyes fully open, preserve facial likeness") appears *before* the caller's scene description in the request — Gemini weights earlier text more heavily |
+| All images included | Both scene and person images (plus any extras) are downloaded and included in the request |
+| Extra images | When `extraImageUrls` is provided, all three images are in the request body |
+| Non-JSON response | Throws a clear error when Gemini returns an HTML error page instead of JSON |
+
+**The camelCase / snake_case distinction:**
+
+In JavaScript/JSON, `camelCase` names each word with a capital letter after the first (`inlineData`, `mimeType`). `snake_case` uses underscores (`inline_data`, `mime_type`). Google's Gemini API uses camelCase, but an earlier version of the API used snake_case, and some error responses mix both. The production code handles both formats; the test verifies both paths are exercised.
+
+---
+
+### What these tests would have caught
+
+Looking back at the commit history, the three gaps the new tests cover correspond directly to production bugs that required an investigation or benchmark to discover:
+
+| Bug | How it was found | How long it was live | Test that would have caught it |
+|---|---|---|---|
+| EXPLORE_TRADE route not tested — any priority change would go unnoticed | Code review during audit | Months | `imagegen-02` sync-guard + `imagegen-05` f12/f13 |
+| `normalizeIntent` didn't include `is_equipment_trade` in the returned intent | Code review during audit | Since EXPLORE_TRADE was added | `imagegen-04` equipment-trade tests |
+| `personInSceneComposite` — invalid API fields + case mismatch → silent failure | D017 benchmark forced a real API call | Since D016 deployed | `imagegen-07` mock tests |
+
+The pattern is consistent: the bugs that survive longest are the ones that fail silently — no error message, no crash, just a wrong or missing result. Unit tests with explicit assertions are what surface these.
 
 ---
 
@@ -778,6 +990,9 @@ This table is updated whenever a billing, auth, or subscription change ships wit
 | WC customer mirror on claim | — | ~~No test verified the DB write or that both DBs had matching records after claim~~ | 2026-05-27 | 2026-05-27 (`app-09` Test 6 — verifies `woocommerce_customer_id` in profiles **and** matching email on WC customer record) |
 | Variable SKU webhook DB write | `app-08-billing-coverage` | ~~Test 3 checks SKU display only (UI). No test sent a PG-PRO-3 payload through the webhook and asserted the DB write~~ | 2026-05-27 | 2026-05-27 (`app-08` Test 6) |
 | Butler backlog E2E | — | ~~No test covered Butler scoring, ButlerReviewSheet open/close, approve (stage DB write), or skip (RPC + skip_until)~~ | 2026-06-02 | 2026-06-02 (`app-12-butler-e2e` Phases 1–8) |
+| EXPLORE_TRADE route coverage | `imagegen-02`, `imagegen-05` | ~~Policy tests used stale inlined rules — catch-all pointed to non-existent `EXPLORE` route key instead of `GENERAL`; `rule-explore-trade` missing entirely from fixtures~~ | Since EXPLORE_TRADE added | 2026-06-05 (`imagegen-02` sync-guard; `imagegen-05` f12/f13/f14 + catch-all renamed) |
+| `normalizeIntent` equipment-trade paths | `imagegen-04` | ~~`is_equipment_trade` derivation (DB-cached and regex fallback) and `enrichTradePrompt` injection not tested — the most domain-specific routing logic had no unit coverage~~ | Since equipment-trade classification added | 2026-06-05 (`imagegen-04` — 10 new tests covering all branches) |
+| `personInSceneComposite` Gemini adapter | — | ~~Zero test coverage for the identity composite function; silent API field errors + camelCase/snake_case mismatch went undetected since D016 deployed~~ | Since D016 deployed | 2026-06-05 (`imagegen-07-composite` — 10 HTTP mock tests) |
 
 ---
 
