@@ -2,6 +2,7 @@
 title: "System Overview"
 description: "Repositories, infrastructure, and the key technology choices behind PostGlider."
 visibility: internal
+verified_against_commit: cba0315
 ---
 
 ## Repositories
@@ -26,7 +27,7 @@ All three repos share the same backend project. The WP repos are canonical sourc
 | Text generation | Large language model (planning, ideas, niche codes) |
 | Business enrichment | Enrichment API |
 | Email | Transactional email service |
-| Social publishing | Postiz (shared org account, `POSTIZ_API_KEY`) |
+| Social publishing | PostforMe (shared org account, `POSTFORME_API_KEY`) |
 | WordPress search | SearchIQ |
 
 ## Key Environment Variables
@@ -101,7 +102,7 @@ The Week Pack Generator is a pure client-side planning step that runs before any
 
 **Virality Engine stub:** Each `WeekPlanSlot` has a `viralityHint?: string` field. When the Virality Engine is integrated, it populates this field; the UI already renders it as a green "Virality boost" badge. No further schema or component changes needed at that point.
 
-**Social publishing (Postiz):** PostGlider operates one shared Postiz Team account. The `POSTIZ_API_KEY` environment variable (server-side only, never exposed to the browser) authenticates all calls to `https://api.postiz.com/public/v1`. Two Route Handlers proxy Postiz on behalf of authenticated users: `GET /api/postiz/connect?platform=<platform>` (returns an OAuth URL) and `GET /api/postiz/integrations` (returns the current integration list for snapshot/diff). Connected channels are stored in `postiz_connections` (Supabase, RLS-scoped to business profile owner).
+**Social publishing (PostforMe):** PostGlider operates one shared PostforMe Team account. The `POSTFORME_API_KEY` environment variable (server-side only, never exposed to the browser) authenticates all calls via the `post-for-me` SDK (v2.7+). Two Route Handlers proxy PostforMe on behalf of authenticated users: `GET /api/postforme/connect?platform=<platform>` (returns an OAuth URL) and `GET /api/postforme/integrations` (returns the current integration list). Connected channels are stored in `postforme_connections` (Supabase, RLS-scoped to business profile owner).
 
 ## Pilot Mode Drip Gate
 

@@ -1,0 +1,220 @@
+---
+title: "Model Discovery & Benchmarking"
+description: "Monthly protocol for finding cheaper and better AI image and video models across providers."
+visibility: internal
+verified_against_commit: cba0315
+---
+
+## Why this exists
+
+PostGlider generates image API calls via the intent pipeline. Costs live in `operation_pricing` and are refreshed daily. Query current costs:
+
+```sql
+SELECT operation_name, credit_cost FROM operation_pricing ORDER BY operation_name;
+```
+
+The competitive moat comes from **one-pass identity**: a model that accepts a business owner's headshot AND knows specific equipment brand names (e.g., "Toro ProCore 648") in a single call collapses both API calls into one.
+
+MuAPI's catalog contains 412 models as of June 2026. Running monthly sweeps against standardized prompts catches pricing changes and surfaces cheaper alternatives before they're needed — not after.
+
+The competitive moat comes from **one-pass identity**: a model that accepts a business owner's headshot AND knows specific equipment brand names (e.g., "Toro ProCore 648") in a single call collapses both API calls into one.
+
+---
+
+## Scripts
+
+Two scripts live in `/scripts` (CommonJS, run from the repo root):
+
+### model-discovery.cjs — monthly benchmark
+
+Compares known production and candidate models. Run this first — it confirms existing costs haven't drifted and validates the current candidate roster.
+
+```bash title="Terminal"
+node scripts/model-discovery.cjs                        # generate + PDF
+node scripts/model-discovery.cjs --pdf-only             # rebuild PDF from today's cached images
+node scripts/model-discovery.cjs --pdf-only 2026-06-01  # rebuild from June 1 images
+```
+
+Output:
+- `/tmp/model-discovery/images/` — generated images (`YYYY-MM-DD-slug.jpg`)
+- `/tmp/model-discovery/report.pdf` — stakeholder PDF with cost delta vs last month
+- `/tmp/model-discovery/cost-history.csv` — running log for month-over-month trending
+
+### model-sweep.cjs — broad discovery
+
+Tests top candidates across MuAPI's full 412-model catalog in 4 probe dimensions.
+
+```bash title="Terminal"
+node scripts/model-sweep.cjs                        # full sweep (~$3–5)
+node scripts/model-sweep.cjs --probe=brand          # brand knowledge only (~$0.80)
+node scripts/model-sweep.cjs --probe=scene          # non-equipment scene baseline (~$0.35)
+node scripts/model-sweep.cjs --probe=identity       # one-pass identity composite (~$0.50)
+node scripts/model-sweep.cjs --probe=video          # video value matrix (~$1.00)
+node scripts/model-sweep.cjs --budget=3             # cap total spend at $3
+node scripts/model-sweep.cjs --refresh-leaderboard  # Playwright scrape of artificialanalysis.ai
+```
+
+Output:
+- `/tmp/model-sweep/{date}/report.pdf` — discovery PDF (this is the one to open)
+- `/tmp/model-sweep/{date}/results.csv` — raw metrics for trending
+- `/tmp/model-sweep/catalog.json` — MuAPI catalog snapshot
+
+---
+
+## Four probe dimensions
+
+<Callout kind="info">
+  Start with `--probe=brand` ($0.80). It answers the highest-value question and is the cheapest probe to run.
+</Callout>
+
+### Brand knowledge (t2i)
+
+Each candidate is run with both a **generic** and a **specific** prompt. If the outputs look identical, the model doesn't have brand knowledge and has no advantage over the cheapest option.
+
+| Prompt type | Example |
+|---|---|
+| Generic | "A professional landscaper aerating a lawn, golden hour" |
+| Specific | "A professional landscaper operating a **Toro ProCore 648** commercial core aerator, soil plugs ejecting" |
+
+Industries require different specificity levels:
+
+| Industry tier | Prompt must contain |
+|---|---|
+| Equipment trades (landscaping, HVAC, plumbing) | Brand + model name (Toro ProCore 648, Lennox XC21) |
+| Skilled trades (tattoo, cosmetology, welding) | Technique + tool (balayage with tinting brush) |
+| Wellness / fitness (yoga, PT, chiro) | Named pose or apparatus (Warrior II on Manduka PRO mat) |
+| Food service | Plating style + equipment (brunoise on plancha, carbon steel) |
+
+<Callout kind="warning">
+  Brand knowledge only activates when the prompt explicitly names the brand. PostGlider's LLM-generated `visual_direction` must inject this specificity from the business profile before NAICS-based model routing has any value. The brand probe validates whether that enrichment is working.
+</Callout>
+
+### Scene quality (t2i)
+
+Baseline quality check for non-equipment service industries. Prompt: hairdresser applying balayage highlights in a modern salon. Answers: what is the cheapest model that produces a publish-ready result?
+
+### One-pass identity composite (i2i)
+
+**This is the moat test.** Each candidate receives the business owner's headshot reference photo plus a brand-specific scene prompt in a single API call. Success criteria (all three required):
+
+1. Face of the reference person is recognizable
+2. Named equipment ("Toro ProCore 648") appears correctly rendered
+3. Output is publish-ready at social media display size
+
+If any model passes all three, PostGlider can eliminate the separate scene generation call — saving $0.045 per image and one full generation latency cycle.
+
+### Video value matrix (i2v)
+
+Compares image-to-video candidates by quality/cost ratio, using [Artificial Analysis](https://artificialanalysis.ai/video/leaderboard/image-to-video) Elo scores as the quality reference. A scene image is auto-generated with `gpt-image-2` and uploaded to Supabase Storage before the video probe runs.
+
+---
+
+## Active candidates (June 2026)
+
+### T2I brand knowledge candidates
+
+| Model | Endpoint | Cost | Notes |
+|---|---|---|---|
+| `gpt4o-text-to-image` | `/api/v1/gpt4o-text-to-image` | $0.04 | GPT-4o native — same brand knowledge as gpt-image-2? |
+| `google-imagen4-fast` | `/api/v1/google-imagen4-fast` | **$0.02** | Cheapest quality model on MuAPI |
+| `google-imagen4` | `/api/v1/google-imagen4` | $0.03 | Google Imagen 4 — strong object rendering |
+| `bytedance-seedream-v5.0` | `/api/v1/bytedance-seedream-v5.0` | $0.0325 | ByteDance new flagship |
+| `nano-banana-pro` | `/api/v1/nano-banana-pro` | $0.12 | Gemini 3 Pro Image, AA Elo 1220 |
+| `midjourney-v7` | `/api/v1/midjourney-v7` | $0.10 | Premium quality baseline |
+
+### I2I one-pass identity candidates
+
+| Model | Endpoint | Cost | Notes |
+|---|---|---|---|
+| `gpt4o-image-to-image` | `/api/v1/gpt4o-image-to-image` | $0.04 | Cheapest GPT-4o i2i |
+| `gpt-image-2-image-to-image` | `/api/v1/gpt-image-2-image-to-image` | $0.09 | gpt-image-2 brand knowledge + reference input |
+| `gpt-image-1.5-edit` | `/api/v1/gpt-image-1.5-edit` | $0.054 | AA i2i Elo 1259 |
+| `vidu-q2-reference-to-image` | `/api/v1/vidu-q2-reference-to-image` | $0.032 | Cheapest reference model |
+| `nano-banana-pro-edit` | `/api/v1/nano-banana-pro-edit` | $0.12 | Premium Gemini editing |
+
+### I2V video value candidates
+
+| Model | Endpoint | Cost | AA i2v Elo | Notes |
+|---|---|---|---|---|
+| `seedance-pro-i2v-fast` | `/api/v1/seedance-pro-i2v-fast` | **$0.10** | — | DRAFT tier (D014: $0.06→$0.10) |
+| `wan2.7-image-to-video` | `/api/v1/wan2.7-image-to-video` | $0.10 | — | New, untested |
+| `grok-imagine-image-to-video` | `/api/v1/grok-imagine-image-to-video` | $0.15 | 1078 | 🔥 AA #4 — broken on MuAPI (see D014), use FAL |
+| `minimax-hailuo-02-standard-i2v` | `/api/v1/minimax-hailuo-02-standard-i2v` | $0.15 | — | DEFAULT tier (D014 winner) |
+| `pixverse-v6-i2v` | `/api/v1/pixverse-v6-i2v` | $0.295 | 1075 | 🔥 AA #5 — broken on MuAPI (see D014), use FAL |
+| `veo3.1-lite-image-to-video` | `/api/v1/veo3.1-lite-image-to-video` | **$0.39** | 1082 | PREMIUM tier (demoted from DEFAULT, D014: $0.30→$0.39) |
+
+<Callout kind="warning">
+  **D014 Update:** MuAPI silently raised video prices. seedance-pro-i2v-fast: $0.06→$0.10, veo3.1-lite: $0.30→$0.39. Also, grok-imagine and pixverse return HTTP 400 on poll (broken) — use FAL as fallback.
+</Callout>
+
+---
+
+## Leaderboard source
+
+Rankings come from [Artificial Analysis](https://artificialanalysis.ai) (not arena.ai — that's LLM-only).
+
+| Leaderboard | URL |
+|---|---|
+| Text-to-Image | https://artificialanalysis.ai/image/leaderboard/text-to-image |
+| Image Editing (i2i) | https://artificialanalysis.ai/image/leaderboard/editing |
+| Image-to-Video | https://artificialanalysis.ai/video/leaderboard/image-to-video |
+| Text-to-Video | https://artificialanalysis.ai/video/leaderboard/text-to-video |
+
+The site is JavaScript-rendered. Run `node scripts/model-sweep.cjs --refresh-leaderboard` to scrape the latest rankings via Playwright and write them to `/tmp/model-sweep/leaderboard.json`. Review that file and update the `AA_ELO` map in `model-sweep.cjs` manually.
+
+---
+
+## AA Elo snapshot (June 2026)
+
+### Text-to-Image
+
+| Rank | Model | Elo |
+|---|---|---|
+| 1 | GPT Image 2 high | 1340 |
+| 2 | GPT Image 1.5 high | 1266 |
+| 3 | Nano Banana 2 (Gemini 3.1 Flash) | 1261 |
+| 4 | Cosmos3-Super-Text2Image | 1241 |
+| 5 | Nano Banana Pro (Gemini 3 Pro) | 1220 |
+
+### Image-to-Video (with audio)
+
+| Rank | Model | Elo | API cost | MuAPI cost |
+|---|---|---|---|---|
+| 1 | Dreamina Seedance 2.0 720p | 1190 | No API | — |
+| 2 | HappyHorse-1.0 | 1160 | Coming soon | $0.90 (skip — overpriced) |
+| 3 | Veo 3.1 | 1087 | $24/min | $2.50 direct |
+| 4 | grok-imagine-video | 1078 | $4.20/min | **$0.15** ← |
+| 5 | PixVerse V6 | 1075 | $6.90/min | $0.295 |
+
+---
+
+## MuAPI known-broken models
+
+Do not add these to `BENCHMARK_SUITE` or `SWEEP_CANDIDATES` without re-testing:
+
+| Model | Status |
+|---|---|
+| `flux-schnell` | 404 on POST despite appearing in `/api/v1/models` catalog |
+| `seedance-2-image-to-video` | `MODEL_NOT_FOUND` — renamed to `seedance-pro-i2v-fast` |
+| `happy-horse-1-image-to-video-720p` | $0.90 on MuAPI vs $0.35 FAL equivalent — skip |
+
+---
+
+## API quick reference (MuAPI)
+
+```
+Base URL: https://api.muapi.ai
+Auth: x-api-key: {MUAPI_API_KEY}   ← NOT Authorization: Bearer (403s on all POSTs)
+
+GET  /api/v1/models                             → full 412-model catalog (no auth required)
+GET  /api/v1/account/balance                    → { balance, currency, email }
+POST /api/v1/{model-name}                       → { request_id, status: "processing", cost: { amount_usd } }
+GET  /api/v1/predictions/{request_id}/result    → { status, outputs: ["https://cdn.muapi.ai/..."] }
+POST /api/v1/models/{model-name}/estimate-cost  → estimated cost before submitting
+```
+
+**Critical field names:**
+- `images_list: [url]` — NOT `image_url` — for all i2i models (nano-banana-2-edit, flux-pulid, etc.)
+- `resolution: "4K"` — must be explicit; default is `1k` which is lower quality
+- CDN URLs in `outputs[]` expire in ~2 minutes. Download immediately with `curl -A "Mozilla/5.0"`.
+- Poll timeout: 150s for image, 180s for video (P90 image generation is ~114s)

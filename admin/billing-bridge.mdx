@@ -2,6 +2,7 @@
 title: "Billing Bridge (supawp-pg)"
 description: "How PostGlider users reach their billing account page without a separate WordPress login screen."
 visibility: internal
+verified_against_commit: cba0315
 ---
 
 ## The Problem
@@ -91,4 +92,4 @@ GitHub Actions builds `supawp.zip`. Download from the release and install via **
 
 - `supawp-pg` must be installed and network-activated on **postglider.com** (the marketing/billing site)
 - The `postglider_anon_key` site option must be populated (set via `configure-site` API or wp-admin)
-- WordPress users on postglider.com are created automatically at checkout — every paying subscriber has one
+- WordPress/WooCommerce customer accounts are created automatically when a PostGlider account is claimed (via `POST /api/auth/claim`), not at checkout. WooCommerce self-registration is disabled. See [Auth & Credits → WooCommerce Customer Mirror](/admin/auth-and-credits#woocommerce-customer-mirror).

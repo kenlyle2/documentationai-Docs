@@ -2,15 +2,16 @@
 title: "Auth & Credits"
 description: "Anonymous session onboarding, account claim flow, and the atomic credit deduction system."
 visibility: internal
+verified_against_commit: cba0315
 ---
 
 ## Auth Flow — Onboarding
 
-The `/start` onboarding flow uses anonymous Supabase sessions. The user never creates an account until the final step.
+The `/free-trial` onboarding flow uses anonymous Supabase sessions. The user never creates an account until the final step.
 
 <Steps>
   <Step title="Anonymous session created" icon="user">
-    On arrival at `/start`, an anonymous session is created automatically. All profile data, ideas, and generated images are stored against this anonymous `user_id`.
+    On arrival at `/free-trial`, an anonymous session is created automatically. All profile data, ideas, and generated images are stored against this anonymous `user_id`.
   </Step>
   <Step title="User completes the flow" icon="wand-sparkles">
     Profile creation, enrichment, first post generation — all stored under the anon ID.
@@ -22,12 +23,30 @@ The `/start` onboarding flow uses anonymous Supabase sessions. The user never cr
       This uses the Admin API rather than the client-side `updateUser()` to avoid the "Confirm Change of Email from [blank]" error that occurs when upgrading an anonymous session client-side.
     </Callout>
 
-    On success, the handler silently upserts a `gallery_tokens` row for the new account via `ignoreDuplicates: true`.
+    On success, the handler:
+    - Upserts a `gallery_tokens` row for the new account (`ignoreDuplicates: true`)
+    - Grants a 7-day reverse Pro trial (`tier: 'pro'`, `trial_ends_at`)
+    - Creates a mirror WooCommerce customer (see below)
   </Step>
   <Step title="All data preserved" icon="check-circle">
     Profile, ideas, and images all remain under the same `user_id`. The user lands on the Dashboard with their session, content, and vault intact.
   </Step>
 </Steps>
+
+## WooCommerce Customer Mirror
+
+Every time a PostGlider account is claimed via `/api/auth/claim`, the handler automatically creates a matching WooCommerce customer on postglider.com and stores the returned ID in `profiles.woocommerce_customer_id`.
+
+**Why this matters:** The subscription webhook (`wpsubscription-webhook`) matches incoming orders by `woocommerce_customer_id` first, then falls back to billing email. Pre-creating the WC customer ensures purchases always route to the correct PostGlider profile — even if the buyer's active WooCommerce session belongs to a different email address.
+
+**Behavior:**
+- If the email is new to WooCommerce → customer is created, ID stored
+- If WooCommerce already has a customer for that email → existing customer is looked up and that ID is stored
+- If the WC API is unreachable or credentials are missing → failure is logged and silently skipped; account creation is never blocked
+
+**WooCommerce self-registration is disabled.** Customers cannot create WooCommerce accounts themselves — at checkout or on `/my-account`. All WC customer records are created exclusively by this mirror flow.
+
+**Env vars required:** `WC_CONSUMER_KEY`, `WC_CONSUMER_SECRET`, `WORDPRESS_SITE_URL`
 
 ## WordPress Session Bridge
 
@@ -37,7 +56,7 @@ Three files in the Next.js app call the WordPress session endpoint after every s
 |---|---|
 | `components/login-form.tsx` | Password sign-in |
 | `app/auth/callback/page.tsx` | Magic link / OAuth callback |
-| `app/start/page.tsx` | Onboarding claim |
+| `app/free-trial/page.tsx` | Onboarding claim |
 
 See [Billing Bridge](/admin/billing-bridge) for the full endpoint details.
 
@@ -61,17 +80,28 @@ Admin accounts bypass the credit limit check (patched in migration `202604130060
 
 ### Credit cost reference
 
-| Action | Credits |
-|---|---|
-| Generate text idea (per idea) | 1 |
-| Genie theme suggestions | 1 |
-| Quick Visual (Ideogram) | 2 |
-| Draft image for pack (gpt-image-1 medium) | 1 |
-| Pilot Mode orchestration (GPT-4o planning) | 2 |
-| Final image / Premium upgrade | 8 |
-| Onboarding image with person reference | 5 |
-| Onboarding workspace-only image | 3 |
-| Background removal | 1 |
-| Weekly Architect gap-fill | 8 |
+All credit costs live in the `operation_pricing` table and are refreshed daily by the pricing-watcher cron. Query current costs:
+
+```sql
+SELECT operation_name, credit_cost, label 
+FROM operation_pricing 
+WHERE routing_key IS NULL
+ORDER BY operation_name;
+```
+
+**Standard credit costs (live from operation_pricing):**
+
+| Action | Credits | Notes |
+|---|---|---|
+| Generate text idea (per idea) | 1 | `text_gen` |
+| Genie theme suggestions | 1 | `text_gen` |
+| Quick Visual (Ideogram) | 2 | `image_quick` |
+| Draft image for pack | 1 | `image_draft` |
+| Pilot Mode orchestration | 2 | *(internal credit)* |
+| Final image / Premium upgrade | 8 | `image_final` |
+| Onboarding image with person reference | 5 | `start_generate` |
+| Onboarding workspace-only image | 3 | `start_generate_ws` |
+| Background removal | 1 | `start_remove_bg` |
+| Weekly Architect gap-fill | 8 | `image_draft` |
 
 Free tier: 50 credits/month. Pro+: 600/month. Both limits reset on the billing anniversary date.

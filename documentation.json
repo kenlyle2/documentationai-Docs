@@ -198,6 +198,16 @@
             "icon": "wrench",
             "pages": [
               {
+                "title": "Recurring Tasks",
+                "path": "admin/tasks",
+                "icon": "calendar-check"
+              },
+              {
+                "title": "Model Discovery & Benchmarking",
+                "path": "admin/model-discovery",
+                "icon": "cpu"
+              },
+              {
                 "title": "Plugin Release Process",
                 "path": "admin/plugin-releases",
                 "icon": "package"

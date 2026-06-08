@@ -1,0 +1,116 @@
+---
+title: "Recurring Tasks"
+description: "Monthly and periodic maintenance procedures for keeping PostGlider healthy."
+visibility: internal
+verified_against_commit: cba0315
+---
+
+## Monthly tasks
+
+Run these at the start of each month, in order. They take about 30–60 minutes total depending on sweep scope.
+
+<Steps>
+  <Step title="Run the model benchmark" icon="cpu" title-type="p">
+    Confirms production model costs haven't drifted and validates current candidates.
+
+    ```bash title="Terminal"
+    node scripts/model-discovery.cjs
+    ```
+
+    Open `/tmp/model-discovery/report.pdf`. If any cost delta exceeds ±10%, investigate before the next billing cycle. See [Model Discovery & Benchmarking](/admin/model-discovery) for full protocol.
+  </Step>
+  <Step title="Run the model sweep" icon="search" title-type="p">
+    Tests top candidates from MuAPI's 400+ model catalog. Start with the cheapest probe:
+
+    ```bash title="Terminal"
+    node scripts/model-sweep.cjs --probe=brand   # ~$0.80 — biggest strategic question
+    node scripts/model-sweep.cjs --probe=video   # ~$1.00 — run if brand results are interesting
+    ```
+
+    Open `/tmp/model-sweep/{date}/report.pdf`. Promote any model that beats the current production candidate on quality **and** cost. Update `BENCHMARK_SUITE` in `model-discovery.cjs` before next month's run.
+  </Step>
+  <Step title="Refresh the leaderboard snapshot" icon="bar-chart" title-type="p">
+    Updates the Artificial Analysis Elo rankings used to prioritize sweep candidates.
+
+    ```bash title="Terminal"
+    node scripts/model-sweep.cjs --refresh-leaderboard
+    ```
+
+    Review `/tmp/model-sweep/leaderboard.json` and manually update the `AA_ELO` map at the top of `scripts/model-sweep.cjs` with any new models or rank changes.
+  </Step>
+  <Step title="Check account balances" icon="wallet" title-type="p">
+    Verify MuAPI and Replicate balances are sufficient for the next month's generation volume.
+
+    ```bash title="Terminal"
+    # MuAPI balance
+    node -e "
+    const https = require('https');
+    const { env } = require('./scripts/_shared/testenv.cjs');
+    const req = https.request({hostname:'api.muapi.ai', path:'/api/v1/account/balance',
+      headers:{'x-api-key':env['MUAPI_API_KEY']}}, res => {
+      const c=[]; res.on('data',d=>c.push(d)); res.on('end',()=>console.log(Buffer.concat(c).toString()));
+    }); req.end();
+    "
+    ```
+
+    Top up if balance is below $10. Monthly image generation spend is approximately $0.165 × active posts generated.
+  </Step>
+  <Step title="Schema refresh" icon="database" title-type="p">
+    Pull the live schema into `supabase/current_schema.sql`. Required after any migration run.
+
+    ```bash title="Terminal"
+    node scripts/refresh-schema.cjs
+    ```
+
+    See [Schema refresh instructions](/admin/architecture#schema-refresh) if MCP auth is needed.
+  </Step>
+  <Step title="Review TECHNICAL_GAPS.md" icon="clipboard-list" title-type="p">
+    Check `.kilocode/TECHNICAL_GAPS.md` for items that have moved from future to actionable. Close any that shipped this month.
+  </Step>
+</Steps>
+
+---
+
+## Quarterly tasks
+
+| Task | What to do |
+|---|---|
+| **Cost history review** | Open `/tmp/model-discovery/cost-history.csv`. Compare month-over-month trends. If any model shows consistent drift, raise with MuAPI or find a replacement. |
+| **One-pass identity sweep** | Run `node scripts/model-sweep.cjs --probe=identity` (~$0.50). Tests whether any new i2i model can replace the 2-call scene + identity composite flow. |
+| **Video tier review** | Run `node scripts/model-sweep.cjs --probe=video` if new video models have been added to the AA leaderboard since last quarter. |
+| **Broken models audit** | Re-test models in the `BROKEN` list at the top of `model-sweep.cjs`. Vendors occasionally fix broken endpoints. |
+| **Prompt specificity audit** | Review production `visual_direction` outputs for a sample of 20 posts. Confirm prompts contain brand/technique names — generic prompts defeat NAICS-based model routing. |
+
+---
+
+## On-demand tasks
+
+These run in response to specific triggers, not on a schedule.
+
+### New model appears in MuAPI catalog
+
+1. Check it against the AA leaderboard (if ranked, note the Elo).
+2. Add to `SWEEP_CANDIDATES` in `model-sweep.cjs` with `role: 'new'`.
+3. Run `node scripts/model-sweep.cjs --probe=brand --budget=1` to get a quick read.
+4. If promising, run the full identity probe.
+
+### Production cost spike detected
+
+1. Check MuAPI account dashboard for any pricing change notification.
+2. Re-run `node scripts/model-discovery.cjs` to confirm the delta.
+3. If confirmed, run `node scripts/model-sweep.cjs --probe=brand` to find a cheaper replacement.
+4. Update `ARCHITECTURE.md` §11 and `imageModels.ts` if a swap is made.
+
+### New AA leaderboard entrant breaks into top 10
+
+1. Find the model's MuAPI slug via `GET /api/v1/models`.
+2. Add to `SWEEP_CANDIDATES` and run a probe.
+3. Update `AA_ELO` map in `model-sweep.cjs`.
+
+---
+
+## Related
+
+- [Model Discovery & Benchmarking](/admin/model-discovery) — full protocol, candidates, API reference
+- [Image Pipeline](/admin/image-pipeline) — how the production image generation pipeline works
+- [Architecture](/admin/architecture) — MuAPI integration details, model routing

@@ -2,6 +2,7 @@
 title: "Operations"
 description: "Common admin SQL snippets, API endpoints, and operational procedures for running PostGlider."
 visibility: internal
+verified_against_commit: cba0315
 ---
 
 ## Admin Panel
@@ -70,6 +71,87 @@ WHERE tags = '{}' OR tags IS NULL
 GROUP BY user_id
 ORDER BY untagged DESC;
 ```
+
+---
+
+## Billing & Credit Mechanics
+
+### Credit counters
+
+Three columns on `profiles` track usage:
+
+| Column | What it stores |
+|---|---|
+| `usage_daily` | Credits consumed today. Reset lazily on the first generation of a new day. |
+| `usage_monthly` | Credits consumed this billing cycle. Reset by the subscription webhook on renewal. |
+| `extra_posts_remaining` | Purchased add-on credits; never expire; drawn down after `usage_monthly` hits limit. |
+
+### Credit limits
+
+`admin_settings` row with `setting_key = 'plan_limits'` holds a JSONB map of tier → limits:
+
+```json
+{
+  "pro":         { "daily_credit_limit": 650, "monthly_credit_limit": 750 },
+  "enterprise":  { "daily_credit_limit": 30,  "monthly_credit_limit": 75  },
+  "free":        { "daily_credit_limit": 5,   "monthly_credit_limit": 5   },
+  "first_class": { "daily_credit_limit": 9999,"monthly_credit_limit": 9999 }
+}
+```
+
+Fetched at runtime by `fetchPlanLimitsForTier()` (`lib/utils/planLimits.ts`). Hardcoded fallbacks exist for the brief window before DB load completes.
+
+### Credit reset
+
+**Daily:** Lazy. `useUsageStats` treats `usage_daily` as 0 when `last_generation_date < today`. The actual DB counter resets inside `charge_credits_atomic` on the first generation of the new day.
+
+**Monthly — authoritative source:** The `wpsubscription-webhook` edge function is the single source of truth. On every `status: active` event from WooCommerce (new subscription OR renewal), it writes `usage_monthly = 0`, `usage_daily = 0`, `usage_reset_date = today`. The billing cycle is defined by WooCommerce's renewal schedule, not the user's signup date. There is no client-side billing cycle calculation — do not add one.
+
+### Credit deduction flow
+
+```
+UI → normalizeIntent() → planExecutor()
+       └── charge_credits_atomic (Postgres RPC) — atomic, idempotent
+             ├── checks usage_monthly < monthly_limit  (402 if over)
+             ├── checks usage_daily   < daily_limit    (402 if over)
+             ├── increments both counters
+             └── logs to credit_usage_log
+```
+
+`execute-image` calls `charge_credits_atomic` directly. Legacy paths use `deductGenerationCreditsAction` (server action), which calls the same RPC.
+
+### Subscription status mapping
+
+The `wpsubscription-webhook` maps WooCommerce statuses to canonical billing states:
+
+| WooCommerce status | Canonical status | Tier effect |
+|---|---|---|
+| `active` | `active` | Set tier from SKU; reset usage |
+| `trialing` | `trialing` | No tier change |
+| `on-hold` | `past_due` | No tier change |
+| `failed` | `past_due` | No tier change |
+| `cancelled` | `canceled` | Downgrade to `free` |
+| `expired` | `canceled` | Downgrade to `free` |
+| `pending-cancel` | `canceled` | Downgrade to `free` |
+
+### Common billing failure modes
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| User shows 0 credits immediately after renewal | Webhook not firing or failing | Check `billing_events` for failed events; verify Bit Integrations → PostGlider webhook is active |
+| `usage_reset_date` is months old | Pre-webhook-fix account; webhook never fired | Admin reset via SQL below |
+| "Insufficient credits" on first generation of new cycle | Webhook fired but DB write failed | Check `billing_events.processing_status = 'failed'`; retry manually |
+
+**Manual credit reset:**
+```sql
+UPDATE profiles
+SET usage_monthly = 0, usage_daily = 0, usage_reset_date = CURRENT_DATE
+WHERE user_id = '<uuid>';
+```
+
+### Test accounts
+
+Test accounts (`kenlyle+2@gmail.com`) are not WooCommerce subscribers and never receive renewal webhooks. Reset manually with the query above using UUID `96afe716-532e-4538-8422-abbaf90a5d88`.
 
 ---
 
@@ -173,18 +255,28 @@ The FACE_IDENTITY and PERSON_FOREGROUND routes (nano-banana-2-edit, i2i) have no
 
 ### Current routing table (June 2026)
 
-| Route | Provider | Model | $/image | Trigger |
-|---|---|---|---|---|
-| GENERAL | MuAPI → Replicate fallback | nano-banana-2 → google/imagen-3 | $0.12 → $0.15 | Catch-all |
-| EXPLORE_TRADE | OpenAI direct | gpt-image-2 low | $0.011 | is_equipment_trade = true |
-| UPGRADE | OpenAI direct | gpt-image-2 medium | $0.042 | stage = UPGRADE |
-| FACE_IDENTITY | MuAPI | nano-banana-2-edit | $0.12 | identity_policy = FACE_PRESERVE |
-| PERSON_FOREGROUND | MuAPI | nano-banana-2-edit | $0.12 | identity_policy = PERSON_SAFE |
-| WORKSPACE_REMIX | FAL (Ideogram) | ideogram/v3/remix | — | has_source_image, no identity |
-| TEXT_HEAVY | FAL (Ideogram) | ideogram/v3 | — | text_required = true |
-| VIDEO_DRAFT | MuAPI | seedance-pro-i2v-fast | $0.10 | video tier = DRAFT |
-| **VIDEO_DEFAULT** | **MuAPI** | **minimax-hailuo-02-standard-i2v** | **$0.15** | **D014 winner — was veo3.1-lite $0.39** |
-| VIDEO_PREMIUM | MuAPI | veo3.1-lite-image-to-video | $0.39 | video tier = PREMIUM (demoted from DEFAULT) |
+| Route | Provider | Model | Trigger |
+|---|---|---|---|
+| GENERAL | MuAPI → Replicate fallback | nano-banana-2 → google/imagen-3 | Catch-all |
+| EXPLORE_NON_TRADE | OpenAI direct | gpt-image-2 medium | Two-step identity pipeline, non-trade |
+| EXPLORE_TRADE | OpenAI direct | gpt-image-2 low | is_equipment_trade = true |
+| UPGRADE | OpenAI direct | gpt-image-2 medium | stage = UPGRADE |
+| FACE_IDENTITY | Google direct | gemini-3.1-flash-image 1K | identity_policy = FACE_PRESERVE (D016) |
+| PERSON_FOREGROUND | Google direct | gemini-3.1-flash-image 1K | identity_policy = PERSON_SAFE (D016) |
+| WORKSPACE_REMIX | FAL (Ideogram) | fal-ai/ideogram/v3/remix | has_source_image, no identity |
+| TEXT_HEAVY | FAL (Ideogram) | fal-ai/ideogram/v3 | text_required = true |
+| VIDEO_DRAFT | MuAPI | seedance-pro-i2v-fast | video tier = DRAFT |
+| VIDEO_DEFAULT | MuAPI | minimax-hailuo-02-standard-i2v | D014 winner — identity + scene quality |
+| VIDEO_PREMIUM | MuAPI | veo3.1-lite-image-to-video | video tier = PREMIUM |
+
+**Credit costs are live in `operation_pricing`.** Query for current values:
+
+```sql
+SELECT operation_name, credit_cost, label 
+FROM operation_pricing 
+WHERE routing_key IS NULL
+ORDER BY operation_name;
+```
 
 ---
 
@@ -214,13 +306,13 @@ User clicks Make Reel (or auto-trigger fires on Person in Scene)
 
 ### Video tiers and credit costs
 
-| Tier | Model | $/clip | Credits | Trigger |
-|---|---|---|---|---|
-| DRAFT | seedance-pro-i2v-fast | $0.10 | 10 | explicit only |
-| **DEFAULT** | **minimax-hailuo-02-standard-i2v** | **$0.15** | **15** | Make Reel button + Person in Scene auto-trigger |
-| PREMIUM | veo3.1-lite-image-to-video | $0.39 | 39 | explicit only |
+| Tier | Model | Credits | Trigger |
+|---|---|---|---|
+| DRAFT | seedance-pro-i2v-fast | 10 | explicit only |
+| **DEFAULT** | **minimax-hailuo-02-standard-i2v** | **15** | Make Reel button + Person in Scene auto-trigger |
+| PREMIUM | veo3.1-lite-image-to-video | 39 | explicit only |
 
-Costs live in `operation_pricing` (keys: `video_draft`, `video_default`, `video_premium`). Update via MCP or SQL if pricing changes — see [Pricing Intelligence](#pricing-intelligence) section.
+Costs live in `operation_pricing` (keys: `video_draft`, `video_default`, `video_premium`).
 
 ### Person in Video (auto-trigger)
 
@@ -359,25 +451,16 @@ Batch mode ($0.034) is also valid — PostGlider's pipeline is already async (Su
 
 ### Pricing context — market price ≠ what PostGlider pays
 
-Leaderboard sites (Artificial Analysis, Magic Hour) report the cheapest API price across all providers. Full pricing disambiguation: `research/Finding-Winning-Models.md`.
+Leaderboard sites (Artificial Analysis, Magic Hour) report the cheapest API price across all providers. Provider costs drive our credit costs via the pricing-watcher cron.
 
-| Model | Leaderboard "market" | MuAPI | Replicate | Google/OpenAI direct |
-|---|---|---|---|---|
-| nano-banana-2 | $0.07 | $0.12 | $0.15 | $0.067 (Google direct) |
-| gpt-image-2 high | $0.19 | **$0.09** (wholesale deal) | — | $0.190 |
-| gpt-image-2 medium | $0.042 | $0.045 | — | $0.042 |
-| gpt-image-2 low | $0.011 | $0.04 | — | **$0.011** |
+**Pricing-watcher alerts show when a route has a cheaper alternative.** Query:
 
-### Querying alerts
-
-**View open alerts:**
 ```sql
 SELECT routing_key, current_provider, current_model, current_cost_usd,
        alt_provider, alt_model, alt_cost_usd, savings_pct, quality_note,
        created_at
 FROM pricing_alerts
-WHERE status = 'open'
-ORDER BY savings_pct DESC;
+ORDER BY created_at DESC;
 ```
 
 **Dismiss an alert (consciously skipping the savings):**
