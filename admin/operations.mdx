@@ -306,13 +306,17 @@ User clicks Make Reel (or auto-trigger fires on Person in Scene)
 
 ### Video tiers and credit costs
 
-| Tier | Model | Credits | Trigger |
-|---|---|---|---|
-| DRAFT | seedance-pro-i2v-fast | 10 | explicit only |
-| **DEFAULT** | **minimax-hailuo-02-standard-i2v** | **15** | Make Reel button + Person in Scene auto-trigger |
-| PREMIUM | veo3.1-lite-image-to-video | 39 | explicit only |
+Credit costs are live in `operation_pricing` (keys: `video_draft`, `video_default`, `video_premium`). Current values:
 
-Costs live in `operation_pricing` (keys: `video_draft`, `video_default`, `video_premium`).
+```sql
+SELECT operation_name, credit_cost FROM operation_pricing WHERE routing_key IN ('video_draft', 'video_default', 'video_premium');
+```
+
+| Tier | Model | Trigger |
+|---|---|---|
+| DRAFT | seedance-pro-i2v-fast | explicit only |
+| **DEFAULT** | **minimax-hailuo-02-standard-i2v** | Make Reel button + Person in Scene auto-trigger |
+| PREMIUM | veo3.1-lite-image-to-video | explicit only |
 
 ### Person in Video (auto-trigger)
 
@@ -434,20 +438,20 @@ PostGlider runs a daily cron that compares current routing costs against market 
 
 | Route | Current | Alternative | Savings | Status |
 |---|---|---|---|---|
-| GENERAL | MuAPI nano-banana-2 @ $0.12 | Google direct nano-banana-2 @ $0.067 | **44%** | Open — migration needed |
-| VIDEO_DEFAULT | MuAPI veo3.1-lite @ $0.30 | MuAPI grok-imagine-i2v @ $0.15 | **50%** | Open — benchmark pending |
+| GENERAL | MuAPI nano-banana-2 @ $0.12 | Google Gemini 3.1 Flash @ $0.067 | **44%** | Pending migration — GOOGLE provider ready in code |
 
 ### The GENERAL route migration path ($0.12 → $0.067)
 
-MuAPI charges $0.12 for nano-banana-2 (Imagen 3). Google's own API charges $0.067 at 1K (1024×1024), or $0.034 in batch mode. Same model weights, no quality difference. To migrate:
+MuAPI charges $0.12 for nano-banana-2 (Imagen 3). Google's own API charges $0.067 at 1K. Same model weights, no quality difference.
 
-1. Add `GOOGLE_AI_API_KEY` env var (Vercel + `.env.local`)
-2. Add `GOOGLE_DIRECT` provider case to `supabase/functions/execute-image/`
-3. Update `IMAGE_ROUTING.GENERAL` in `lib/config/imageModels.ts` + mirror to `supabase/functions/_shared/imageModels.ts`
+**Status:** The GOOGLE provider in `execute-image` edge function is ready. To complete migration:
+1. Ensure `GOOGLE_AI_API_KEY` env var is set (Vercel + `.env.local`)
+2. Update `IMAGE_ROUTING.GENERAL` in `lib/config/imageModels.ts` from `MUAPI` to `GOOGLE`
+3. Mirror to `supabase/functions/_shared/imageModels.ts`
 4. Run `npx tsc --noEmit` + smoke test one generation
 5. Dismiss the open `pricing_alerts` entry for GENERAL after routing is changed
 
-Batch mode ($0.034) is also valid — PostGlider's pipeline is already async (Supabase Realtime). No user-facing change required.
+Since PostGlider's pipeline is already async (Supabase Realtime), no user-facing change required.
 
 ### Pricing context — market price ≠ what PostGlider pays
 
