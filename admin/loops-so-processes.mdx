@@ -36,7 +36,7 @@ Templates are created and published via the Content API. Once published, only th
 | Template name | ID | Data variables | Status |
 |---|---|---|---|
 | Welcome | `cmnp4rutf05ge0i00romvggcq` | (uses contact fields) | Live — wired |
-| Payment confirmed | `cmnats4sp00n6011u9e5e8w88` | `userName`, `amount`, `date`, `paymentMethod`, `invoiceLink` | Live — fully wired. `order_total` (`${order_total.value}`) and `payment_method_title` (`${order_payment_method_title.value}`) both live in Bit Integrations |
+| Payment confirmed | `cmnats4sp00n6011u9e5e8w88` | `userName`, `amount`, `date`, `paymentMethod`, `invoiceLink` | Live — fully wired. All Bit Integrations fields live: `${order_total.value}`, `${order_payment_method_title.value}`, `${order_id.value}` |
 | Billing Failure Alert | `cmq7937rs04vz0jwn6t5mikue` | `userName`, `errorType`, `source`, `status`, `subscriptionId`, `eventId`, `retryCount`, `processedAt`, `recoveryLink` | Live — wired (admin-only alert) |
 
 The `LOOPS_BILLING_ALERT_ID` is stored as a Supabase edge function secret (not hardcoded) so it can be changed without a deploy. The `LOOPS_WELCOME_EMAIL_ID` is hardcoded in `wpsubscription-webhook/index.ts` — move it to a secret if you ever need to swap the template.
@@ -62,7 +62,7 @@ The `LOOPS_BILLING_ALERT_ID` is stored as a Supabase edge function secret (not h
 | `amount` | `payload.order_total` → formatted as `$49.00` | — (live: `${order_total.value}` in Bit Integrations) |
 | `date` | Current date (formatted) | — |
 | `paymentMethod` | `payload.payment_method_title` | — (live: `${order_payment_method_title.value}` in Bit Integrations) |
-| `invoiceLink` | `postglider.com/my-account/view-order/{order_id}` | `app.postglider.com/billing` |
+| `invoiceLink` | `postglider.com/my-account/view-order/{order_id}` | `app.postglider.com/billing` — (live: `${order_id.value}` in Bit Integrations; fallback never used now) |
 
 ---
 
