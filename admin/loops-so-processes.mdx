@@ -62,7 +62,7 @@ The `LOOPS_BILLING_ALERT_ID` is stored as a Supabase edge function secret (not h
 | `amount` | `payload.order_total` → formatted as `$49.00` | — (live: `${order_total.value}` in Bit Integrations) |
 | `date` | Current date (formatted) | — |
 | `paymentMethod` | `payload.payment_method_title` | — (live: `${order_payment_method_title.value}` in Bit Integrations) |
-| `invoiceLink` | `postglider.com/my-account/view-order/{order_id}` | `app.postglider.com/billing` — (live: `${order_id.value}` in Bit Integrations; fallback never used now) |
+| `invoiceLink` | `postglider.com/my-account/view-order/{order_id}` | — (live: `${order_id.value}` in Bit Integrations) |
 
 ---
 
