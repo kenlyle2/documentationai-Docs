@@ -1,0 +1,234 @@
+---
+title: "Loops.so — Email workflows and processes"
+description: "Inventory of every Loops workflow, template, and lifecycle event used by PostGlider, plus the process for creating new ones."
+visibility: internal
+---
+
+> This is the single source of truth for PostGlider's email automation. Before wiring any new Loops workflow, read this file. Before touching any existing one, check the template ID here — never infer it from code.
+
+---
+
+## Account overview
+
+- **Platform:** Loops.so
+- **Env var (Next.js + edge functions):** `LOOPS_API_KEY`
+- **Edge function secret only:** `LOOPS_BILLING_ALERT_ID`
+- **Sending domain:** postglider.com (`ken@postglider.com` default sender)
+- **API base URL:** `https://app.loops.so/api/v1/`
+- **Auth:** `Authorization: Bearer {LOOPS_API_KEY}`
+
+All Loops calls currently originate from Supabase edge functions, not the Next.js app. The three reusable helpers live in `supabase/functions/wpsubscription-webhook/index.ts` and are copy-pasted (not shared) into any function that needs them:
+
+| Helper | What it does |
+|---|---|
+| `loopsUpsertContact(email, props)` | Creates or updates a contact; sets CRM properties |
+| `loopsFireEvent(email, eventName, props)` | Fires a named lifecycle event (triggers automations) |
+| `loopsSendTransactional(email, templateId, dataVariables)` | Sends a one-off transactional email immediately |
+
+All three are fire-and-forget with error logging — they never throw or fail the calling function.
+
+---
+
+## Template inventory
+
+Templates are created and published via the Content API. Once published, only the ID is needed in code.
+
+| Template name | ID | Data variables | Status |
+|---|---|---|---|
+| Welcome | `cmnp4rutf05ge0i00romvggcq` | (uses contact fields) | Live — wired |
+| Payment confirmed | `cmnats4sp00n6011u9e5e8w88` | `userName`, `amount`, `date`, `paymentMethod`, `invoiceLink` | Live — fully wired. `order_total` (`${order_total.value}`) and `payment_method_title` (`${order_payment_method_title.value}`) both live in Bit Integrations |
+| Billing Failure Alert | `cmq7937rs04vz0jwn6t5mikue` | `userName`, `errorType`, `source`, `status`, `subscriptionId`, `eventId`, `retryCount`, `processedAt`, `recoveryLink` | Live — wired (admin-only alert) |
+
+The `LOOPS_BILLING_ALERT_ID` is stored as a Supabase edge function secret (not hardcoded) so it can be changed without a deploy. The `LOOPS_WELCOME_EMAIL_ID` is hardcoded in `wpsubscription-webhook/index.ts` — move it to a secret if you ever need to swap the template.
+
+---
+
+## Wired workflows
+
+### 1. Payment confirmed (receipt)
+
+**Trigger:** `wpsubscription-webhook` — any `status=active` event (new purchase, renewal, reactivation). Fires in both the new-user and existing-user paths.
+
+**What happens:** `loopsSendTransactional(customerEmail, LOOPS_PAYMENT_CONFIRMED_ID, { ... })` — sends a payment receipt to the customer immediately.
+
+**Template:** Payment confirmed (`cmnats4sp00n6011u9e5e8w88`)  
+**Recipient:** Customer
+
+**Data variables supplied:**
+
+| Variable | Source | Fallback |
+|---|---|---|
+| `userName` | `billing_first_name` | customer email |
+| `amount` | `payload.order_total` → formatted as `$49.00` | — (live: `${order_total.value}` in Bit Integrations) |
+| `date` | Current date (formatted) | — |
+| `paymentMethod` | `payload.payment_method_title` | — (live: `${order_payment_method_title.value}` in Bit Integrations) |
+| `invoiceLink` | `postglider.com/my-account/view-order/{order_id}` | `app.postglider.com/billing` |
+
+---
+
+### 2. Welcome — new WooCommerce subscriber (no prior account)
+
+**Trigger:** `wpsubscription-webhook` receives `status=active` from WooCommerce and finds no matching PostGlider profile.
+
+**What happens:**
+1. Supabase auth user + profile created
+2. 4-digit onboarding code generated (72h TTL), stored on profile
+3. `loopsUpsertContact` — sets `subscriptionTier`, `firstName`, `lastName`
+4. `loopsSendTransactional(email, LOOPS_WELCOME_EMAIL_ID, { code })` — sends welcome email with sign-in code
+
+**Template:** Welcome (`cmnp4rutf05ge0i00romvggcq`)
+
+---
+
+### 3. Welcome — existing user's first WooCommerce activation
+
+**Trigger:** `wpsubscription-webhook` receives `status=active` and finds a PostGlider profile with `billing_provider = null` (never billed before).
+
+**What happens:** Same as workflow 1 but skips profile creation — generates a new onboarding code and sends the welcome email to give them a frictionless sign-in path.
+
+**Template:** Welcome (`cmnp4rutf05ge0i00romvggcq`)
+
+---
+
+### 4. Contact tier sync
+
+**Trigger:** Every `wpsubscription-webhook` event that successfully processes (any status change).
+
+**What happens:** `loopsUpsertContact(email, { subscriptionTier, firstName, lastName })` — keeps the Loops contact record current so list segmentation and automations always see the correct tier.
+
+**No template** — this is a contact property update, not an email send.
+
+---
+
+### 5 & 6. Subscription upgraded / downgraded
+
+**Trigger:** `wpsubscription-webhook` detects a tier change (`newTier !== previousTier`).
+
+**What happens:** `loopsFireEvent(email, 'subscription_upgraded' | 'subscription_downgraded', { previousTier, newTier })` — fires the event into Loops so any automation built around these events can trigger.
+
+**No template yet** — the events fire but no Loops automation is built on top of them. Wire up upgrade/downgrade email sequences when ready.
+
+---
+
+### 7. Billing Failure Alert — trial injection failure (real-time)
+
+**Trigger:** `wpsubscription-webhook` — the `injectTrialIntoWpSubscription()` call fails (WP API timeout or error) when a customer converts during an active trial.
+
+**What happens:**
+1. Webhook returns HTTP 500 to WooCommerce (triggers retry)
+2. `billing_events` row marked `processing_status = failed`
+3. `loopsSendTransactional('kenlyle@gmail.com', LOOPS_BILLING_ALERT_ID, { ... })` fires immediately
+
+**Template:** Billing Failure Alert (`cmq7937rs04vz0jwn6t5mikue`)  
+**Recipient:** Admin (`kenlyle@gmail.com`)  
+**Data variables:** `userName`, `errorType`, `source`, `status`, `subscriptionId`, `eventId`, `retryCount`, `processedAt`, `recoveryLink`
+
+See `documentationai-Docs/admin/billing-injustice.mdx` for the full background on why this matters.
+
+---
+
+### 8. Billing Failure Alert — reconciliation cron
+
+**Trigger:** `billing-recon` edge function (pg_cron, every 15 minutes). Fires for any `billing_events` row that has `alerted = false` and is either:
+- `processing_status = failed` for > 15 minutes, or
+- `processing_status = pending` for > 30 minutes
+
+**What happens:** Same alert template as workflow 6. After the email sends, `alerted = true` is set immediately (before the send, actually — mark-first pattern to prevent duplicates on crash).
+
+**Template:** Billing Failure Alert (`cmq7937rs04vz0jwn6t5mikue`)  
+**Recipient:** Admin (`kenlyle@gmail.com`)
+
+---
+
+## Planned workflows (not yet built)
+
+These represent the intended full lifecycle email program. Build them in the Loops dashboard first (create automation or template), then wire the trigger in code.
+
+| # | Workflow | Trigger point | Type | Notes |
+|---|---|---|---|---|
+| 9 | Trial started | Anonymous trial session created | Event → Automation | Fire `loopsFireEvent(email, 'trial_started')` from the free-trial signup path |
+| 10 | Trial ending soon | Day 5 of 7-day trial | Automation (time-based) | Build as a Loops automation triggered by `trial_started` + 5-day delay |
+| 11 | Trial expired | Day 8, not converted | Automation | Re-engagement sequence — "you had 7 days, here's what you made" |
+| 12 | Activation — first content generated | `generated_ideas` first row inserted | Event → Automation | `loopsFireEvent(email, 'first_content_generated')` from idea generation path |
+| 13 | Activation — first week pack published | First PostforMe schedule completes | Event → Automation | `loopsFireEvent(email, 'first_pack_published')` |
+| 14 | Account inactive | 30 days with no generation | Automation (time-based) | Build off `last_active_at` contact property or a scheduled cron |
+| 15 | Social account connected | `postforme_connections` row inserted | Event | `loopsFireEvent(email, 'social_account_connected', { platform })` |
+
+---
+
+## How to create a new Loops template
+
+The Loops Content API (open alpha as of 2026-06) supports programmatic template creation. The full sequence:
+
+### Step 1 — Create the template shell
+
+```bash
+curl -X POST "https://app.loops.so/api/v1/transactional-emails" \
+  -H "Authorization: Bearer $LOOPS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Your Template Name"}'
+# → { "id": "...", "draftEmailMessageId": "...", "draftEmailMessageContentRevisionId": "..." }
+```
+
+Save `id` (the template ID) and `draftEmailMessageId`.
+
+### Step 2 — Write the email body (LMX format)
+
+LMX is Loops' XML-like template language. Key rules:
+- Variables: `{data.varName}` (not `{{varName}}`)
+- Elements: `<Paragraph>`, `<Button href="{data.link}">`, `<Style ... />` (design tokens, copy from an existing template)
+- The `<Style />` block must be present and first
+
+Minimal example:
+```xml
+<Style backgroundColor="" ... (copy full style block from existing template) />
+<Paragraph>Hello {data.userName},</Paragraph>
+<Paragraph>Your message here.</Paragraph>
+<Button href="{data.ctaLink}">Take Action →</Button>
+```
+
+### Step 3 — Update the draft with content
+
+```bash
+curl -X POST "https://app.loops.so/api/v1/email-messages/{draftEmailMessageId}" \
+  -H "Authorization: Bearer $LOOPS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "expectedRevisionId": "{draftEmailMessageContentRevisionId}",
+    "subject": "Your email subject",
+    "previewText": "Short preview text",
+    "fromName": "PostGlider",
+    "lmx": "<Style .../>\n<Paragraph>...</Paragraph>"
+  }'
+# → { "contentRevisionId": "new-rev-id", ... }
+```
+
+### Step 4 — Publish
+
+```bash
+curl -X POST "https://app.loops.so/api/v1/transactional-emails/{templateId}/publish" \
+  -H "Authorization: Bearer $LOOPS_API_KEY"
+# → { "publishedEmailMessageId": "...", "dataVariables": ["varName", ...] }
+```
+
+### Step 5 — Document and wire
+
+1. Add the template to the inventory table above (name, ID, data variables, status)
+2. Add the workflow to the wired workflows section above
+3. If the `LOOPS_BILLING_ALERT_ID` pattern applies (admin-only, operational), store the ID as a Supabase edge function secret. For user-facing templates that are referenced in code constants, a hardcoded const is acceptable.
+4. Update `ARCHITECTURE.md` §5 Known templates table
+5. Commit
+
+### Step 6 — Test
+
+```bash
+curl -X POST "https://app.loops.so/api/v1/transactional" \
+  -H "Authorization: Bearer $LOOPS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transactionalId": "{templateId}",
+    "email": "kenlyle@gmail.com",
+    "dataVariables": { "varName": "test value", ... }
+  }'
+# → { "success": true }
+```
