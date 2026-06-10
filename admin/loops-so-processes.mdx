@@ -31,13 +31,35 @@ All three are fire-and-forget with error logging — they never throw or fail th
 
 ## Template inventory
 
-Templates are created and published via the Content API. Once published, only the ID is needed in code.
+Templates are created via `scripts/loops-build-automations.cjs`. Re-run it to rebuild any template. Once published, only the ID is needed in code.
 
-| Template name | ID | Data variables | Status |
+### Transactional (code-triggered)
+
+| Template name | ID | Variables | Status |
 |---|---|---|---|
-| Welcome | `cmnp4rutf05ge0i00romvggcq` | (uses contact fields) | Live — wired |
-| Payment confirmed | `cmnats4sp00n6011u9e5e8w88` | `userName`, `amount`, `date`, `paymentMethod`, `invoiceLink` | Live — fully wired. All Bit Integrations fields live: `${order_total.value}`, `${order_payment_method_title.value}`, `${order_id.value}` |
-| Billing Failure Alert | `cmq7937rs04vz0jwn6t5mikue` | `userName`, `errorType`, `source`, `status`, `subscriptionId`, `eventId`, `retryCount`, `processedAt`, `recoveryLink` | Live — wired (admin-only alert) |
+| Welcome | `cmnp4rutf05ge0i00romvggcq` | (contact fields) | Live — wired |
+| Payment confirmed | `cmnats4sp00n6011u9e5e8w88` | `userName`, `amount`, `date`, `paymentMethod`, `invoiceLink` | Live — wired |
+| Billing Failure Alert | `cmq7937rs04vz0jwn6t5mikue` | `userName`, `errorType`, `source`, `status`, `subscriptionId`, `eventId`, `retryCount`, `processedAt`, `recoveryLink` | Live — wired (admin-only) |
+
+### Automation (Loops dashboard — pick from "Email" step dropdown)
+
+All 13 automation templates are published. Wire them to Loops automations in the dashboard.
+
+| Key | Template ID | Automation | Day | Trigger event |
+|---|---|---|---|---|
+| `trial-day-1-welcome` | `cmq7c7sdc094b0kweaxyl1ijq` | A | 0 | `trial_started` |
+| `trial-day-3-nudge` | `cmq7c7sla09270kwa6yqx61rl` | A | 3 | `trial_started` + 3d delay |
+| `trial-day-5-ending-soon` | `cmq7c7su00eec0jxi17zadj9z` | B | 5 | `trial_started` + 5d delay |
+| `trial-day-7-last-day` | `cmq7c7t210ehp0jxijmp62uzs` | A | 7 | `trial_started` + 7d delay |
+| `trial-expired-no-conversion` | `cmq7c7t9v0eq40jzcj0sq59ia` | C | 8 | `trial_started` + 8d delay, filter: no `subscription_upgraded` |
+| `activation-first-post` | `cmq7c7vn7094u0kwe3omdp99b` | D | 0 | `first_post_generated` |
+| `activation-connect-social` | `cmq7c7vvw0f2a0jwndq5n9qya` | D | 2 | `first_post_generated` + 2d delay |
+| `pro-welcome` | `cmq7c7w3l0erq0jw0dhmxkubq` | E | 0 | `subscription_upgraded` |
+| `pro-tips-day-3` | `cmq7c7wbl08ue0jy5xzivtzwl` | E | 3 | `subscription_upgraded` + 3d delay |
+| `win-back` | `cmq7c7wjq0ez90jzdc97fkci9` | F | 0 | `subscription_downgraded` |
+| `enrichment-ready` | `cmq7c7z0i0erd0jy8z3eskmdu` | G | 0 | `enrichment_complete` |
+| `social-connect-prompt` | `cmq7c82fr0bat0jvx0rnhot2c` | H | 3 | `profile_created` + 3d delay, filter: no `social_account_connected` |
+| `niche-expert` | `cmq7c85jp0et70jw0056ru5uh` | I | 0 | `niche_confirmed` |
 
 The `LOOPS_BILLING_ALERT_ID` is stored as a Supabase edge function secret (not hardcoded) so it can be changed without a deploy. The `LOOPS_WELCOME_EMAIL_ID` is hardcoded in `wpsubscription-webhook/index.ts` — move it to a secret if you ever need to swap the template.
 
@@ -179,21 +201,127 @@ Contact properties are set both **event-time** (immediate, per action) and via t
 
 ---
 
-## Planned Loops dashboard automations (no code required)
+## Loops dashboard automation setup guide
 
-Build these in the Loops dashboard. The trigger events are already firing — the automations just need to be wired up.
+All 13 templates are published and ready. These automations need to be created in the **Loops dashboard → Automations**. No code changes required.
 
-| # | Automation | Trigger event | Priority | Notes |
-|---|---|---|---|---|
-| A | Trial nurture sequence (days 1, 3, 5, 7) | `trial_started` | **Highest** — conversion lever | Include `{contact.trialEndsAt}` for urgency |
-| B | Trial ending soon | `trial_started` + 5-day delay | High | "2 days left" reminder |
-| C | Trial expired, not converted | `trial_started` + 8-day delay (no `subscription_upgraded`) | High | "Here's what you made" win-back |
-| D | Activation sequence | `first_post_generated` | High | Encourage first pack → publish |
-| E | Pro tips drip | `subscription_upgraded` | Medium | Onboarding for paid users |
-| F | Win-back sequence | `subscription_downgraded` | Medium | |
-| G | Onboarding / enrichment ready | `enrichment_complete` | Medium | Wire trigger first |
-| H | Social connection prompt | `profile_created` + no `social_account_connected` within 3 days | Low | |
-| I | Niche expert nurture | `niche_confirmed` | Low | Requires industry-specific content writing |
+For each automation: click **New Automation** → set the trigger event → add **Delay** and **Email** steps as described → activate.
+
+---
+
+### Automation A — Trial nurture sequence
+
+**Trigger:** Event `trial_started`  
+**Goal:** Convert free-trial users to paid subscribers
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Email | Immediate | `cmq7c7sdc094b0kweaxyl1ijq` (Trial — Day 1: Welcome) |
+| 2 | Delay | 3 days | — |
+| 3 | Email | — | `cmq7c7sla09270kwa6yqx61rl` (Trial — Day 3: Mid-trial nudge) |
+| 4 | Delay | 4 days | — |
+| 5 | Email | — | `cmq7c7t210ehp0jxijmp62uzs` (Trial — Day 7: Last day) |
+
+> Note: Day 5 "ending soon" email is Automation B — a separate automation so it can be disabled independently.
+
+---
+
+### Automation B — Trial ending soon
+
+**Trigger:** Event `trial_started`  
+**Goal:** Urgency email at the 5-day mark
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Delay | 5 days | — |
+| 2 | Email | — | `cmq7c7su00eec0jxi17zadj9z` (Trial — Day 5: Ending soon) |
+
+---
+
+### Automation C — Trial expired, not converted
+
+**Trigger:** Event `trial_started`  
+**Condition filter:** Add a filter: contact property `subscriptionTier` is NOT `pro` (or however Loops supports negative conditions)  
+**Goal:** Win back users who let the trial expire
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Delay | 8 days | — |
+| 2 | Email | — | `cmq7c7t9v0eq40jzcj0sq59ia` (Trial — Day 8+: Expired) |
+
+---
+
+### Automation D — Activation sequence
+
+**Trigger:** Event `first_post_generated`  
+**Goal:** Push from "generated content" → "published on social"
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Email | Immediate | `cmq7c7vn7094u0kwe3omdp99b` (Activation — First post) |
+| 2 | Delay | 2 days | — |
+| 3 | Email | — | `cmq7c7vvw0f2a0jwndq5n9qya` (Activation — Connect social) |
+
+---
+
+### Automation E — Pro onboarding drip
+
+**Trigger:** Event `subscription_upgraded`  
+**Goal:** Ensure new Pro users discover high-value features
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Email | Immediate | `cmq7c7w3l0erq0jw0dhmxkubq` (Pro — Welcome) |
+| 2 | Delay | 3 days | — |
+| 3 | Email | — | `cmq7c7wbl08ue0jy5xzivtzwl` (Pro — Day 3: Power feature) |
+
+---
+
+### Automation F — Win-back
+
+**Trigger:** Event `subscription_downgraded`  
+**Goal:** Understand churn, leave a door open
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Email | Immediate | `cmq7c7wjq0ez90jzdc97fkci9` (Win-back — Downgraded) |
+
+---
+
+### Automation G — Enrichment ready
+
+**Trigger:** Event `enrichment_complete`  
+**Note:** Wire the trigger first (currently pending — see wired events table above)  
+**Goal:** Re-engage users after their Google data updates
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Email | Immediate | `cmq7c7z0i0erd0jy8z3eskmdu` (Enrichment — Profile updated) |
+
+---
+
+### Automation H — Social connection prompt
+
+**Trigger:** Event `profile_created`  
+**Condition filter:** Contact does NOT have `socialConnected = true`  
+**Goal:** Get users to connect social accounts before going inactive
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Delay | 3 days | — |
+| 2 | Email | — | `cmq7c82fr0bat0jvx0rnhot2c` (Social — Connect prompt) |
+
+---
+
+### Automation I — Niche expert nurture
+
+**Trigger:** Event `niche_confirmed`  
+**Note:** Wire the trigger first (currently pending — see wired events table above)  
+**Goal:** Celebrate niche confirmation and drive content generation
+
+| Step | Type | Delay | Template ID |
+|---|---|---|---|
+| 1 | Email | Immediate | `cmq7c85jp0et70jw0056ru5uh` (Niche — Expert content strategy) |
 
 ---
 
