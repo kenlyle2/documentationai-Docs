@@ -1,0 +1,244 @@
+---
+title: "Email Automation Workflows (Upstash Workflow)"
+description: "Architecture, route inventory, trigger map, and runbook for PostGlider's code-native email automation engine. Read before touching any workflow route or adding a new email sequence."
+visibility: internal
+---
+
+> **Single source of truth for the automation engine.** Email *content* (templates, copy, subject lines) lives in Loops. Email *sequencing* (when to send, delays, conditional skips) lives here in code via Upstash Workflow. Read both this doc and `loops-so-processes.mdx` before touching either layer.
+
+---
+
+## Architecture overview
+
+PostGlider's email automation uses two systems that work together:
+
+| Layer | System | What it owns |
+|---|---|---|
+| **Sequencing** | Upstash Workflow (`@upstash/workflow`) | When to send, delays, conditional logic, retries |
+| **Sending** | Loops | Email templates, contact management, delivery |
+
+**Why not Loops native automations?** The Loops API has no endpoint for creating or managing automations programmatically. Upstash Workflow gives us version-controlled, code-reviewed, retryable sequences with full DB access for conditional logic. Loops is the automation API roadmap for the future, but with no committed date.
+
+**How it works end-to-end:**
+
+```
+User action (claim / onboard / generate / subscribe)
+  └── trigger point in Next.js route or Edge Function
+        └── triggerWorkflow('/route-name', { email })
+              └── QStash publishes to POST /api/workflows/{name}
+                    └── serve() handler: context.run() + context.sleep()
+                          └── loopsSendTransactional(email, TEMPLATE_ID)
+                                └── Loops sends the email
+```
+
+Each `context.run()` step is idempotent — QStash replays failed steps automatically. `context.sleep()` is durable — the function sleeps without holding a serverless instance.
+
+---
+
+## Env vars
+
+| Variable | Where set | Required by |
+|---|---|---|
+| `QSTASH_TOKEN` | Vercel (production) + Supabase edge function secrets | All trigger helpers |
+| `QSTASH_CURRENT_SIGNING_KEY` | Vercel (production) | Signature verification on `/api/workflows/*` |
+| `QSTASH_NEXT_SIGNING_KEY` | Vercel (production) | Key rotation safety |
+| `QSTASH_URL` | Vercel (production) | SDK internal use |
+| `WORKFLOW_BASE_URL` | Vercel (production) + Supabase edge function secrets | Target URL for QStash publish (`https://app.postglider.com`) |
+
+All 5 Vercel vars and 2 Supabase secrets are set as of 2026-06-10. Source keys from Upstash console → QStash → API/Signing Keys.
+
+---
+
+## Trigger helpers
+
+Two helpers exist — use the right one for the context:
+
+| Helper | Location | Used in |
+|---|---|---|
+| `triggerWorkflow(path, body)` | `lib/workflowClient.ts` | Next.js routes (Node.js) |
+| `triggerWorkflow(path, body)` | `supabase/functions/_shared/triggerWorkflow.ts` | Deno edge functions |
+
+Both are fire-and-forget: errors are logged but never thrown, so a QStash outage never breaks the primary user action.
+
+---
+
+## Workflow route inventory
+
+All routes live under `app/api/workflows/`. Each exports a `POST` handler via `serve()` from `@upstash/workflow/nextjs`.
+
+### A — Trial nurture (`trial-nurture/route.ts`)
+
+**Trigger:** `trial_started` event (claim route)  
+**Goal:** Convert free-trial users to paid
+
+| Step | What | Template key |
+|---|---|---|
+| Immediate | Welcome email | `TRIAL_WELCOME` |
+| +3 days | Mid-trial nudge | `TRIAL_DAY3_NUDGE` |
+| +4 days | Last day urgency | `TRIAL_DAY7_LAST` |
+
+---
+
+### B — Trial ending soon (`trial-ending/route.ts`)
+
+**Trigger:** `trial_started` (same claim event as A — separate route so it can be paused independently)
+
+| Step | What | Template key |
+|---|---|---|
+| +5 days | Ending soon | `TRIAL_DAY5_ENDING` |
+
+---
+
+### C — Trial expired (`trial-expired/route.ts`)
+
+**Trigger:** `trial_started` (same claim event as A, B)  
+**Conditional:** At step execution time, queries DB — skips send if `billing_subscription_ref` is set (user already converted).
+
+| Step | What | Template key |
+|---|---|---|
+| +8 days | Trial expired (skip if converted) | `TRIAL_EXPIRED` |
+
+---
+
+### D — Activation sequence (`activation/route.ts`)
+
+**Trigger:** `first_post_generated` (generate-text edge function, `priorCount === 0` guard)  
+**Goal:** Push from "generated content" → "published on social"
+
+| Step | What | Template key |
+|---|---|---|
+| Immediate | First post celebration | `ACTIVATION_FIRST` |
+| +2 days | Connect social accounts | `ACTIVATION_SOCIAL` |
+
+---
+
+### E — Pro welcome (`pro-welcome/route.ts`)
+
+**Trigger:** `subscription_upgraded` (wpsubscription-webhook, `isUpgrade === true`)
+
+| Step | What | Template key |
+|---|---|---|
+| Immediate | Welcome to Pro | `PRO_WELCOME` |
+| +3 days | Power feature tips | `PRO_TIPS_DAY3` |
+
+---
+
+### F — Win-back (`win-back/route.ts`)
+
+**Trigger:** `subscription_downgraded` (wpsubscription-webhook, `isUpgrade === false`)
+
+| Step | What | Template key |
+|---|---|---|
+| Immediate | Win-back | `WIN_BACK` |
+
+---
+
+### G — Enrichment ready (`enrichment-ready/route.ts`)
+
+**Trigger:** `enrichment_complete` — **route exists, trigger not yet wired**  
+Add `triggerWorkflow('/enrichment-ready', { email })` wherever `enrichment_complete` fires (Outscraper enrichment completion handler).
+
+| Step | What | Template key |
+|---|---|---|
+| Immediate | Profile enriched | `ENRICHMENT_READY` |
+
+---
+
+### H — Social connection prompt (`social-prompt/route.ts`)
+
+**Trigger:** `profile_created` (onboarding/run route, fires after first profile save)
+
+| Step | What | Template key |
+|---|---|---|
+| +3 days | Connect social accounts | `SOCIAL_PROMPT` |
+
+---
+
+### I — Niche expert nurture (`niche-expert/route.ts`)
+
+**Trigger:** `niche_confirmed` — **route exists, trigger not yet wired**  
+Add `triggerWorkflow('/niche-expert', { email })` wherever niche confirmation fires in Settings/onboarding.
+
+| Step | What | Template key |
+|---|---|---|
+| Immediate | Niche expert strategy | `NICHE_EXPERT` |
+
+---
+
+## Trigger map — all wired points
+
+| Code location | Automations triggered | Status |
+|---|---|---|
+| `app/api/auth/claim/route.ts` (after `loopsFireEvent trial_started`) | A, B, C | **Wired** |
+| `app/api/onboarding/run/route.ts` (after `profile_created` fetch) | H | **Wired** |
+| `supabase/functions/generate-text/index.ts` (inside `priorCount === 0` guard) | D | **Wired** |
+| `supabase/functions/wpsubscription-webhook/index.ts` (after `loopsFireEvent upgrade/downgrade`) | E or F | **Wired** |
+| Outscraper enrichment completion | G | **Pending** |
+| Settings/onboarding niche confirmation | I | **Pending** |
+
+---
+
+## Template IDs (code constants)
+
+All template IDs live in `lib/config/workflowTemplates.ts` as named constants. Never hardcode a template ID outside that file.
+
+```typescript
+// lib/config/workflowTemplates.ts
+export const WORKFLOW_TEMPLATES = {
+  TRIAL_WELCOME:     'cmq7c7sdc094b0kweaxyl1ijq',
+  TRIAL_DAY3_NUDGE:  'cmq7c7sla09270kwa6yqx61rl',
+  TRIAL_DAY5_ENDING: 'cmq7c7su00eec0jxi17zadj9z',
+  TRIAL_DAY7_LAST:   'cmq7c7t210ehp0jxijmp62uzs',
+  TRIAL_EXPIRED:     'cmq7c7t9v0eq40jzcj0sq59ia',
+  ACTIVATION_FIRST:  'cmq7c7vn7094u0kwe3omdp99b',
+  ACTIVATION_SOCIAL: 'cmq7c7vvw0f2a0jwndq5n9qya',
+  PRO_WELCOME:       'cmq7c7w3l0erq0jw0dhmxkubq',
+  PRO_TIPS_DAY3:     'cmq7c7wbl08ue0jy5xzivtzwl',
+  WIN_BACK:          'cmq7c7wjq0ez90jzdc97fkci9',
+  ENRICHMENT_READY:  'cmq7c7z0i0erd0jy8z3eskmdu',
+  SOCIAL_PROMPT:     'cmq7c82fr0bat0jvx0rnhot2c',
+  NICHE_EXPERT:      'cmq7c85jp0et70jw0056ru5uh',
+};
+```
+
+---
+
+## Monitoring & debugging
+
+**Upstash console:** https://console.upstash.com → QStash → Workflows  
+- View active workflow runs, step history, and failed steps
+- Failed steps are retried automatically (exponential backoff)
+- A workflow stuck in "running" beyond the expected window may indicate a Loops API error in a `context.run()` step
+
+**Logs:** Each trigger logs `[workflow] triggered /route-name → runId: ...` to Vercel Functions logs. Each Deno trigger logs to Supabase edge function logs.
+
+---
+
+## How to add a new workflow
+
+1. Create `app/api/workflows/{name}/route.ts` following the pattern in any existing route
+2. Import `WORKFLOW_TEMPLATES as T` from `@/lib/config/workflowTemplates`
+3. Create the Loops template first via `scripts/loops-build-automations.cjs` (or manually per `loops-so-processes.mdx`)
+4. Add the template ID to `lib/config/workflowTemplates.ts`
+5. Wire the trigger at the appropriate event point using `triggerWorkflow('/name', { email })`
+6. Update this doc: add route to inventory table and trigger to trigger map
+7. Update `loops-so-processes.mdx` template inventory (new template row, Status = Live — wired)
+8. TypeScript check: `npx tsc --noEmit`
+9. Commit all in one shot (route + template constant + trigger wire + both docs)
+
+---
+
+## Loops automation API — future state
+
+Loops has confirmed that Workflow API support is "next on the roadmap" with no committed date (as of 2026-06). When it ships, we could optionally migrate sequencing back to Loops-native automations. **This is not a priority** — Upstash Workflow is architecturally superior (version-controlled, DB-aware, retryable) and the current implementation is production-grade.
+
+If/when Loops ships the Automation API, evaluate whether migration is worth the effort. Decision criteria: does it remove the QStash dependency without sacrificing conditional DB checks (Automation C) or multi-step sequencing with durable sleep?
+
+---
+
+## Known gaps
+
+| Gap | Impact | Owner | Notes |
+|---|---|---|---|
+| G (enrichment-ready) trigger not wired | Enrichment email never fires | Engineering | Wire when Outscraper enrichment completion point is identified |
+| I (niche-expert) trigger not wired | Niche confirmation email never fires | Engineering | Wire when niche confirmation UI flow is built |

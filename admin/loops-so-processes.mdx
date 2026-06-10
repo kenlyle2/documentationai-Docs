@@ -4,7 +4,7 @@ description: "Inventory of every Loops workflow, template, and lifecycle event u
 visibility: internal
 ---
 
-> This is the single source of truth for PostGlider's email automation. Before wiring any new Loops workflow, read this file. Before touching any existing one, check the template ID here — never infer it from code.
+> **Scope:** This file covers Loops templates, contact management, and transactional sends. Email *sequencing* (automations A–I) is owned by Upstash Workflow in code — see `email-workflows.mdx` for the sequencing engine. Read both docs before touching any email automation work.
 
 ---
 
@@ -41,9 +41,9 @@ Templates are created via `scripts/loops-build-automations.cjs`. Re-run it to re
 | Payment confirmed | `cmnats4sp00n6011u9e5e8w88` | `userName`, `amount`, `date`, `paymentMethod`, `invoiceLink` | Live — wired |
 | Billing Failure Alert | `cmq7937rs04vz0jwn6t5mikue` | `userName`, `errorType`, `source`, `status`, `subscriptionId`, `eventId`, `retryCount`, `processedAt`, `recoveryLink` | Live — wired (admin-only) |
 
-### Automation (Loops dashboard — pick from "Email" step dropdown)
+### Automation (sequenced by Upstash Workflow — Loops is the template store only)
 
-All 13 automation templates are published. Wire them to Loops automations in the dashboard.
+All 13 automation templates are published. Sequencing (delays, conditional logic) is handled by Upstash Workflow routes in `app/api/workflows/` — **do not create these as Loops dashboard automations**. The Loops dashboard is used only for template editing and email stats.
 
 | Key | Template ID | Automation | Day | Trigger event |
 |---|---|---|---|---|
@@ -128,7 +128,7 @@ The `LOOPS_BILLING_ALERT_ID` is stored as a Supabase edge function secret (not h
 
 **What happens:** `loopsFireEvent(email, 'subscription_upgraded' | 'subscription_downgraded', { previousTier, newTier })` — fires the event into Loops so any automation built around these events can trigger.
 
-**No template yet** — the events fire but no Loops automation is built on top of them. Wire up upgrade/downgrade email sequences when ready.
+**Templates:** Pro welcome + Pro tips day 3 (upgrade) / Win-back (downgrade) — sequenced by Upstash Workflow routes `pro-welcome` and `win-back`. See `email-workflows.mdx` automations E and F.
 
 ---
 
@@ -201,127 +201,13 @@ Contact properties are set both **event-time** (immediate, per action) and via t
 
 ---
 
-## Loops dashboard automation setup guide
+## Automation sequencing — Upstash Workflow (not Loops dashboard)
 
-All 13 templates are published and ready. These automations need to be created in the **Loops dashboard → Automations**. No code changes required.
+> Automations A–I are **code-owned** via Upstash Workflow routes in `app/api/workflows/`. Do not create or manage these in the Loops dashboard — the dashboard has no automations for A–I and that is correct. Loops is the template store and sending layer only.
+>
+> For the full automation inventory, trigger map, route code, and runbook, see **`email-workflows.mdx`**.
 
-For each automation: click **New Automation** → set the trigger event → add **Delay** and **Email** steps as described → activate.
-
----
-
-### Automation A — Trial nurture sequence
-
-**Trigger:** Event `trial_started`  
-**Goal:** Convert free-trial users to paid subscribers
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Email | Immediate | `cmq7c7sdc094b0kweaxyl1ijq` (Trial — Day 1: Welcome) |
-| 2 | Delay | 3 days | — |
-| 3 | Email | — | `cmq7c7sla09270kwa6yqx61rl` (Trial — Day 3: Mid-trial nudge) |
-| 4 | Delay | 4 days | — |
-| 5 | Email | — | `cmq7c7t210ehp0jxijmp62uzs` (Trial — Day 7: Last day) |
-
-> Note: Day 5 "ending soon" email is Automation B — a separate automation so it can be disabled independently.
-
----
-
-### Automation B — Trial ending soon
-
-**Trigger:** Event `trial_started`  
-**Goal:** Urgency email at the 5-day mark
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Delay | 5 days | — |
-| 2 | Email | — | `cmq7c7su00eec0jxi17zadj9z` (Trial — Day 5: Ending soon) |
-
----
-
-### Automation C — Trial expired, not converted
-
-**Trigger:** Event `trial_started`  
-**Condition filter:** Add a filter: contact property `subscriptionTier` is NOT `pro` (or however Loops supports negative conditions)  
-**Goal:** Win back users who let the trial expire
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Delay | 8 days | — |
-| 2 | Email | — | `cmq7c7t9v0eq40jzcj0sq59ia` (Trial — Day 8+: Expired) |
-
----
-
-### Automation D — Activation sequence
-
-**Trigger:** Event `first_post_generated`  
-**Goal:** Push from "generated content" → "published on social"
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Email | Immediate | `cmq7c7vn7094u0kwe3omdp99b` (Activation — First post) |
-| 2 | Delay | 2 days | — |
-| 3 | Email | — | `cmq7c7vvw0f2a0jwndq5n9qya` (Activation — Connect social) |
-
----
-
-### Automation E — Pro onboarding drip
-
-**Trigger:** Event `subscription_upgraded`  
-**Goal:** Ensure new Pro users discover high-value features
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Email | Immediate | `cmq7c7w3l0erq0jw0dhmxkubq` (Pro — Welcome) |
-| 2 | Delay | 3 days | — |
-| 3 | Email | — | `cmq7c7wbl08ue0jy5xzivtzwl` (Pro — Day 3: Power feature) |
-
----
-
-### Automation F — Win-back
-
-**Trigger:** Event `subscription_downgraded`  
-**Goal:** Understand churn, leave a door open
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Email | Immediate | `cmq7c7wjq0ez90jzdc97fkci9` (Win-back — Downgraded) |
-
----
-
-### Automation G — Enrichment ready
-
-**Trigger:** Event `enrichment_complete`  
-**Note:** Wire the trigger first (currently pending — see wired events table above)  
-**Goal:** Re-engage users after their Google data updates
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Email | Immediate | `cmq7c7z0i0erd0jy8z3eskmdu` (Enrichment — Profile updated) |
-
----
-
-### Automation H — Social connection prompt
-
-**Trigger:** Event `profile_created`  
-**Condition filter:** Contact does NOT have `socialConnected = true`  
-**Goal:** Get users to connect social accounts before going inactive
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Delay | 3 days | — |
-| 2 | Email | — | `cmq7c82fr0bat0jvx0rnhot2c` (Social — Connect prompt) |
-
----
-
-### Automation I — Niche expert nurture
-
-**Trigger:** Event `niche_confirmed`  
-**Note:** Wire the trigger first (currently pending — see wired events table above)  
-**Goal:** Celebrate niche confirmation and drive content generation
-
-| Step | Type | Delay | Template ID |
-|---|---|---|---|
-| 1 | Email | Immediate | `cmq7c85jp0et70jw0056ru5uh` (Niche — Expert content strategy) |
+The Loops dashboard automation builder is not used for PostGlider's lifecycle sequences. (Loops has confirmed Workflow API support is on their roadmap with no committed date. When it ships, evaluate migration — but Upstash Workflow is the production system until then.)
 
 ---
 
