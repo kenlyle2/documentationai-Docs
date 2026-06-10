@@ -140,19 +140,60 @@ See `documentationai-Docs/admin/billing-injustice.mdx` for the full background o
 
 ---
 
-## Planned workflows (not yet built)
+## Wired events — summary
 
-These represent the intended full lifecycle email program. Build them in the Loops dashboard first (create automation or template), then wire the trigger in code.
+| Event | Trigger | Code location | Status |
+|---|---|---|---|
+| `trial_started` | User claims permanent account (7-day trial granted) | `app/api/auth/claim/route.ts` | **Wired** |
+| `profile_created` | Onboarding completes and first business profile is saved | `app/api/onboarding/run/route.ts` | **Wired** |
+| `first_post_generated` | User's first content idea is generated and saved | `supabase/functions/generate-text/index.ts` | **Wired** |
+| `first_pack_created` | User creates their first week pack | `lib/actions/campaignActions.ts` | **Wired** |
+| `subscription_upgraded` | WooCommerce webhook detects tier upgrade | `supabase/functions/wpsubscription-webhook/index.ts` | **Wired** |
+| `subscription_downgraded` | WooCommerce webhook detects tier downgrade | `supabase/functions/wpsubscription-webhook/index.ts` | **Wired** |
+| `gemini_quota_exceeded` | Gemini API returns 429 | `lib/gemini.ts` | **Wired** |
+| `enrichment_complete` | Outscraper enrichment finishes | In registry — trigger not yet wired | Pending |
+| `niche_confirmed` | User confirms NAICS/SIC code in Settings | In registry — trigger not yet wired | Pending |
+| `social_account_connected` | PostforMe OAuth connection completes | In registry, allowlist — trigger not yet wired | Pending |
 
-| # | Workflow | Trigger point | Type | Notes |
+---
+
+## Contact properties
+
+Contact properties are set both **event-time** (immediate, per action) and via the **nightly sync-all** (`POST /api/loops/sync-all`) which runs against all `profiles` rows. The two layers guarantee completeness without a queue.
+
+| Property | Type | Source | Set at event-time | Synced nightly |
 |---|---|---|---|---|
-| 9 | Trial started | Anonymous trial session created | Event → Automation | Fire `loopsFireEvent(email, 'trial_started')` from the free-trial signup path |
-| 10 | Trial ending soon | Day 5 of 7-day trial | Automation (time-based) | Build as a Loops automation triggered by `trial_started` + 5-day delay |
-| 11 | Trial expired | Day 8, not converted | Automation | Re-engagement sequence — "you had 7 days, here's what you made" |
-| 12 | Activation — first content generated | `generated_ideas` first row inserted | Event → Automation | `loopsFireEvent(email, 'first_content_generated')` from idea generation path |
-| 13 | Activation — first week pack published | First PostforMe schedule completes | Event → Automation | `loopsFireEvent(email, 'first_pack_published')` |
-| 14 | Account inactive | 30 days with no generation | Automation (time-based) | Build off `last_active_at` contact property or a scheduled cron |
-| 15 | Social account connected | `postforme_connections` row inserted | Event | `loopsFireEvent(email, 'social_account_connected', { platform })` |
+| `subscriptionTier` | string | `profiles.tier` | WooCommerce webhook | ✓ |
+| `firstName` | string | `profiles.billing_first_name` | WooCommerce webhook | — |
+| `lastName` | string | `profiles.billing_last_name` | WooCommerce webhook | — |
+| `trialStartedAt` | string (ISO) | `profiles.created_at` | `auth/claim` | ✓ |
+| `trialEndsAt` | string (ISO) | `profiles.trial_ends_at` | `auth/claim` | ✓ |
+| `pilotEligible` | boolean | `profiles.pilot_eligible` | — | ✓ |
+| `firstPostGeneratedAt` | string (ISO) | `generated_ideas` insert time | `generate-text` edge fn | — |
+| `firstPackCreatedAt` | string (ISO) | `week_packs` insert time | `campaignActions.ts` | — |
+| `socialConnected` | boolean | PostforMe connected accounts | To be wired | — |
+| `businessName` | string | Onboarding | `onboarding/run` | — |
+| `industry` | string | Onboarding | `onboarding/run` | — |
+| `location` | string | Onboarding | `onboarding/run` | — |
+| `hasGoogleData` | boolean | Onboarding | `onboarding/run` | — |
+
+---
+
+## Planned Loops dashboard automations (no code required)
+
+Build these in the Loops dashboard. The trigger events are already firing — the automations just need to be wired up.
+
+| # | Automation | Trigger event | Priority | Notes |
+|---|---|---|---|---|
+| A | Trial nurture sequence (days 1, 3, 5, 7) | `trial_started` | **Highest** — conversion lever | Include `{contact.trialEndsAt}` for urgency |
+| B | Trial ending soon | `trial_started` + 5-day delay | High | "2 days left" reminder |
+| C | Trial expired, not converted | `trial_started` + 8-day delay (no `subscription_upgraded`) | High | "Here's what you made" win-back |
+| D | Activation sequence | `first_post_generated` | High | Encourage first pack → publish |
+| E | Pro tips drip | `subscription_upgraded` | Medium | Onboarding for paid users |
+| F | Win-back sequence | `subscription_downgraded` | Medium | |
+| G | Onboarding / enrichment ready | `enrichment_complete` | Medium | Wire trigger first |
+| H | Social connection prompt | `profile_created` + no `social_account_connected` within 3 days | Low | |
+| I | Niche expert nurture | `niche_confirmed` | Low | Requires industry-specific content writing |
 
 ---
 
