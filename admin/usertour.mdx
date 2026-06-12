@@ -107,7 +107,68 @@ UserTour is self-hosted on **Railway** (not a VPS). The Railway service runs the
 | `SYNC_TRIGGER_SECRET` | Manual trigger auth for `/api/sync-cohorts` |
 | `CRON_SECRET` | Vercel Cron auth (shared with other cron routes) |
 
-All three UserTour vars are currently blank in `.env.local`. Both code paths are guarded with silent no-ops — no user-facing errors, no broken UI — but **no tours will show and no trait data accumulates** until the vars are filled in. Set them in Vercel env vars (and `.env.local` for local dev) to activate the full pipeline without any code changes.
+All three UserTour vars are set in both `.env.local` and Vercel production (verified 2026-06-11). Both code paths are guarded with silent no-ops — no user-facing errors, no broken UI — if the vars are ever removed, tours stop silently without breaking the app.
+
+## Inspecting & backfilling user attributes
+
+Use this when you need to verify what trait values a specific user has, or to manually seed attributes for a test account.
+
+### Check a user's current traits (Supabase)
+
+Run via Supabase MCP `execute_sql` (project `qzyvfuoyfrfosdtbczkc`):
+
+```sql
+SELECT
+  u.id AS user_id, u.email, u.created_at,
+  p.tier, p.pilot_eligible,
+  GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - u.created_at)) / 86400))::int AS signup_days_ago,
+  (SELECT count(*) FROM generated_ideas g WHERE g.user_id = u.id) AS generated_ideas_count,
+  (SELECT count(*) FROM curated_suggestions c WHERE c.user_id = u.id AND c.status = 'approved') AS approved_count,
+  (SELECT count(*) FROM user_images i WHERE i.user_id = u.id) AS vault_image_count,
+  (SELECT count(*) FROM postforme_connections pc WHERE pc.user_id = u.id) AS social_connections,
+  (SELECT count(*) FROM business_profiles bp WHERE bp.user_id = u.id) AS business_profiles_count
+FROM auth.users u
+LEFT JOIN profiles p ON p.user_id = u.id
+WHERE u.email = 'user@example.com';
+```
+
+Trait mapping:
+- `first_idea_generated` = `generated_ideas_count > 0`
+- `vault_has_images` = `vault_image_count > 0`
+- `social_connected` = `social_connections > 0`
+- `profile_complete` = `business_profiles_count > 0`
+- `onboarding_complete` = `profile_complete && first_idea_generated`
+- `published_ideas_per_day` = `approved_count / signup_days_ago`
+
+### Push attributes to UserTour (REST API)
+
+Attributes auto-create in UserTour on first use. Key by auth UUID so the SDK's `usertour.identify()` calls merge correctly:
+
+```bash
+curl -X POST "$USERTOUR_API_URL/v1/users" \
+  -H "Authorization: Bearer $USERTOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "<auth-uuid>",
+    "attributes": {
+      "first_idea_generated": true,
+      "vault_has_images": false,
+      "social_connected": false,
+      "profile_complete": true,
+      "onboarding_complete": true,
+      "signup_days_ago": 3,
+      "plan": "free",
+      "pilot_eligible": false
+    }
+  }'
+```
+
+List users (no GET /v1/attributes endpoint exists):
+
+```bash
+curl "$USERTOUR_API_URL/v1/users?limit=20" \
+  -H "Authorization: Bearer $USERTOUR_API_KEY"
+```
 
 ## Tour builder guide
 
