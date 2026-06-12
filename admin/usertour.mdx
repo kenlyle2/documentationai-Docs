@@ -93,6 +93,19 @@ The user has content but no connected channel. This tour runs once an idea is sa
 
 Completion fires `social_connected = true`.
 
+## Trait write architecture — two paths, no database intermediary
+
+Traits reach UserTour through two parallel paths. Neither buffers through a Supabase table — both write directly to UserTour.
+
+| Path | Caller | When | Traits pushed |
+|---|---|---|---|
+| **Client SDK** | `UsertourProvider` → `usertour.identify()` | Every page load and App Router navigation | `profile_complete`, `vault_has_images`, `first_idea_generated`, `social_connected`, `onboarding_complete`, `plan`, `signup_days_ago` |
+| **Server batch** | Vercel Cron `GET /api/sync-cohorts` @ 09:00 UTC | Nightly | `stuck_score`, `last_intent`, `published_ideas_per_day`, `recommended_doc_url`, `recommended_doc_title` |
+
+**Why the split:** The booleans that control which tour fires (the `is true`/`is false` trigger conditions) must be real-time — a tour should start the moment a user completes an action, not the next morning. Engagement and churn signals (`stuck_score`, `last_intent`) are expensive aggregates computed across the full user record; pushing them on every page load would be wasteful and they don't gate any tour triggers.
+
+**Cron safety default:** `POST /api/sync-cohorts` defaults to `?dryRun=true` so manual API calls during development cannot accidentally bulk-push bad traits. The Vercel Cron calls `GET /api/sync-cohorts`, which always runs live — `dryRun` does not apply to the GET handler.
+
 ## Hosting
 
 UserTour is self-hosted on **Railway** (not a VPS). The Railway service runs the UserTour instance; the Next.js app connects to it via the three env vars below.
