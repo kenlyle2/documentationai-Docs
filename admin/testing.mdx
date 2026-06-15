@@ -45,6 +45,7 @@ node scripts/run-all.cjs social       # only the social-publishing tests
 | `app-08-billing-coverage` | `kenlyle+2@gmail.com` (real, admin) | Pricing public access, Pro Plus removal, Pro SKU display (PG-PRO-N), billing events tab visibility, extra posts pill, variable SKU webhook DB write |
 | `app-09-purchase-funnel` | `kenlyle+2@gmail.com` (real) / anonymous | `/sign-up` email capture form, known/unknown email routing, `POST /api/auth/pre-checkout` API contract, `/login?next=` redirect |
 | `app-12-butler-e2e` | `kenlyle+2@gmail.com` (real, landscaper, Pro tier) | 8-phase Butler backlog flow: seed ideas → score via `/api/butler/run` → banner visible in Pilot mode → open ButlerReviewSheet → swipe right (approve, DB asserted) → verify `butler_reasoning` → swipe left (skip, `butler_skip_count` + `butler_skip_until` DB asserted) |
+| `app-15-gmb-connect` | `kenlyle+2@gmail.com` (real) | Infrastructure checks for Google Business Profile OAuth connect flow: 401 when unauthenticated, valid Google OAuth URL returned authenticated, callback error paths redirect correctly, social settings page renders GMB row, Connect button initiates OAuth navigation |
 | `e2e-generate` | `kenlyle+2@gmail.com` (real, 2-profile) | Full week-pack generation E2E for all modes (pilot/passenger) × routes (trivial/mixed/edge/story/vault/edit-from-pack); profile auto-selection, Architect scan, TinderReview, pack assembly, PostforMe calendar verification |
 | `e2e-partial-week` | `kenlyle+2@gmail.com` (real) | Partial first-week onboarding: asserts Architect plan and pack item count ≤ days remaining in the current `week_starts_on`-aligned week; self-adjusts expected count by running day |
 | `social-01-fb-publish` | `kenlyle+2@gmail.com` (real) | End-to-end Facebook publish: generate idea, save, select page, publish, verify success badge |
@@ -711,6 +712,41 @@ butler_skip_until ≈ now + 7d  (resurface window set correctly)
 
 ```bash
 node scripts/app-12-butler-e2e.cjs --headed
+```
+
+---
+
+### app-15-gmb-connect
+
+**Screenshots:** `/tmp/pg-gmb-shots/`
+**Credentials:** `kenlyle+2@gmail.com` (real)
+**Viewport:** 1280×900 (desktop)
+
+Infrastructure smoke-test for the Google Business Profile OAuth connect flow. This is a pure infrastructure test — it validates API contracts and redirect behaviour without completing a real OAuth round-trip (which requires a Google account interaction that cannot be automated).
+
+| Check | What it tests |
+|---|---|
+| 1 — Unauthenticated 401 | `GET /api/gmb/connect` without a session returns `401` |
+| 2 — Authenticated OAuth URL | `GET /api/gmb/connect` with a valid session returns `{ url }` pointing to `accounts.google.com/o/oauth2/v2/auth` with `access_type=offline`, `prompt=consent`, and `business.manage` scope |
+| 3 — Callback no params | `GET /api/gmb/callback` with no query params redirects to `/settings/social?gmb=error` |
+| 4 — Callback bad state | `GET /api/gmb/callback?code=x&state=invalid` redirects to `/settings/social?gmb=error` |
+| 5 — Social page GMB row | `/settings/social` renders the "Google Business Profile" row |
+| 6 — Connect button | Clicking Connect fetches `/api/gmb/connect` and navigates toward Google OAuth (navigation intercepted + aborted so the test stays on-app) |
+
+**Key assertions:**
+
+```
+GET /api/gmb/connect (no session) → 401
+GET /api/gmb/connect (session)    → 200 { url: 'https://accounts.google.com/...' }
+OAuth URL contains access_type=offline, prompt=consent, business.manage scope
+GET /api/gmb/callback (no params) → 307 → /settings/social?gmb=error
+GET /api/gmb/callback (bad state) → 307 → /settings/social?gmb=error
+/settings/social Google Business Profile row visible
+Connect button triggers Google OAuth navigation
+```
+
+```bash
+node scripts/app-15-gmb-connect.cjs
 ```
 
 ---
