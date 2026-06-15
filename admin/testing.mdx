@@ -2,7 +2,7 @@
 title: "Automated Testing"
 description: "Full test suite documentation: all scripts, shared utilities, accounts, what they test, and chain reasoning."
 visibility: internal
-verified_against_commit: cba0315
+verified_against_commit: 0c7bb31
 ---
 
 ## Overview
@@ -994,6 +994,89 @@ This table is updated whenever a billing, auth, or subscription change ships wit
 | EXPLORE_TRADE route coverage | `imagegen-02`, `imagegen-05` | ~~Policy tests used stale inlined rules — catch-all pointed to non-existent `EXPLORE` route key instead of `GENERAL`; `rule-explore-trade` missing entirely from fixtures~~ | Since EXPLORE_TRADE added | 2026-06-05 (`imagegen-02` sync-guard; `imagegen-05` f12/f13/f14 + catch-all renamed) |
 | `normalizeIntent` equipment-trade paths | `imagegen-04` | ~~`is_equipment_trade` derivation (DB-cached and regex fallback) and `enrichTradePrompt` injection not tested — the most domain-specific routing logic had no unit coverage~~ | Since equipment-trade classification added | 2026-06-05 (`imagegen-04` — 10 new tests covering all branches) |
 | `personInSceneComposite` Gemini adapter | — | ~~Zero test coverage for the identity composite function; silent API field errors + camelCase/snake_case mismatch went undetected since D016 deployed~~ | Since D016 deployed | 2026-06-05 (`imagegen-07-composite` — 10 HTTP mock tests) |
+| `e2e-generate` sequential isolation | `e2e-generate` | Chaining routes in one process causes stale idea/pack accumulation — test results degrade on 2nd+ route. Must run each route as a separate process. | 2026-06-11 | Documented — no code fix needed; architectural constraint |
+| `e2e-generate` vault assertions | `e2e-generate` | ~~Vault tests waited for "Approve"/"Add to Pack" which never appear after single-photo vault generation (effectiveBatchSize=1 → GEN_COMPLETE → review state)~~ | Since vault route added | 2026-06-11 (`e2e-generate.cjs` — vault assertions rewritten to waitForResponse + button re-enable) |
+| `e2e-generate` VaultPickerModal origin filter | `e2e-generate` | ~~`setupProfile()` keeperIds query included ai_generated images; VaultPickerModal only shows upload/gmb — setup kept invisible images, vault picker showed 0 tiles~~ | Since vault route added | 2026-06-11 (`e2e-generate.cjs` — added `origin=in.(upload,gmb)` to keeperIds query) |
+
+---
+
+## e2e-generate — Design Constraints and Pitfalls
+
+The `e2e-generate` script is the most complex test in the suite. Each route/mode combination encodes assumptions about XState state transitions, UI element visibility, and database state that are not obvious from the code. These notes are the hard-won lessons from a full suite audit.
+
+### Sequential isolation — one route per process
+
+**Never chain e2e-generate runs in a loop.** The test account (`kenlyle+2@gmail.com`) accumulates ideas, packs, and PostForMe posts across runs. A second run that starts while stale ideas exist from the first run will pick them up in Architect scans, inflate `effectiveBatchSize`, and send the XState machine down a different branch than expected. Pack assembly finds too many ideas. TinderReview enters with 3 ideas when the test expects 1.
+
+**Correct pattern:** Run each route independently as a separate process. Results are stable when run in isolation; they degrade when chained.
+
+```bash
+# Good — each route is a fresh process
+node scripts/e2e-generate.cjs pilot trivial
+node scripts/e2e-generate.cjs pilot story
+node scripts/e2e-generate.cjs pilot vault
+
+# Bad — stale state accumulates between routes
+node scripts/e2e-generate.cjs pilot trivial && node scripts/e2e-generate.cjs pilot story
+```
+
+### Vault route — review state, not TinderReview
+
+When a vault route runs with a single vault photo (the default), `effectiveBatchSize=1` causes the XState machine to send `GEN_COMPLETE` rather than `BATCH_COMPLETE`. The page returns to the settings panel — `GeneratorConfiguration` renders again — rather than entering TinderReview.
+
+**Assertions that do NOT work after vault generation:**
+- Waiting for "Approve"/"Reject" swipe buttons (only appear in `tinder.reviewing`)
+- Waiting for "Add to Pack" (only visible when `isPilotMode=true` on an IdeaCard — not in review state)
+- Waiting for "Schedule to Socials" (only visible when `saved=true`)
+
+**Correct assertion pattern for vault:**
+```javascript
+// 1. Wait for the generate-text API to return 200
+const responsePromise = page.waitForResponse(
+    r => r.url().includes('generate-text') && r.status() === 200,
+    { timeout: 120_000 }
+);
+await clickCreateMyBatch();
+await responsePromise;
+
+// 2. Wait for "Create My Batch" to re-enable (page returned to ready state)
+await page.waitForFunction(
+    () => {
+        const btn = Array.from(document.querySelectorAll('button'))
+            .find(b => b.textContent?.includes('Create My Batch'));
+        return btn && !btn.disabled;
+    },
+    null,
+    { timeout: 30_000, polling: 500 }
+);
+```
+
+### Person In Scene nudge — suppress before clicking
+
+Any test account with `headshot_1` set on its business profile will trigger the Person In Scene nudge modal when "Create My Batch" is clicked. The nudge intercepts the click and the generation never starts.
+
+`clickCreateMyBatch()` in `e2e-generate.cjs` pre-sets `localStorage['pg_pis_nudge_dismissed'] = '1'` before each click. If you add a new click-path that bypasses `clickCreateMyBatch()`, this localStorage key must be set first.
+
+### forcePassenger convention for story/vault routes
+
+Story and vault routes use the personal-photo generate flow, which forces `is_pilot_mode_active=false` regardless of account state. `setupProfile()` detects `ROUTE === 'story' || ROUTE === 'vault'` and sets `forcePassenger=true` before writing the profile. Without this, the profile remains in pilot mode, the Assemble Plan flow activates, and the route never enters the single-photo path.
+
+### VaultPickerModal origin filter — impacts setup
+
+`VaultPickerModal.tsx` queries `user_images` with `.in('origin', ['upload', 'gmb'])`. Images with `origin='ai_generated'` are invisible to the picker regardless of how many exist in the DB.
+
+`setupProfile()` in `e2e-generate.cjs` scopes its vault keeperIds query accordingly:
+
+```javascript
+// Keep only upload/gmb images — ai_generated images are invisible to VaultPickerModal
+`/rest/v1/user_images?user_id=eq.${profile.user_id}&archived=eq.false&origin=in.(upload,gmb)&select=id&limit=${KEEP_FOR_VAULT}&order=created_at.desc`
+```
+
+If you update the keeperIds logic and forget this filter, cleanup will keep the N most-recent user_images (which may all be `ai_generated`), and the vault picker will show 0 tiles.
+
+### VaultPickerModal — expand to all-time
+
+The picker defaults to showing all-time images, but the script's `findUnselectedTile()` helper handles the case where all visible tiles are already selected. It expands to the full image set (via "Show all images" button) when no unselected tile is found in the initial view.
 
 ---
 
