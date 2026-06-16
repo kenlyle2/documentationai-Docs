@@ -742,23 +742,29 @@ If any pillar shows fewer than 5 unique posts, all three consumers (Orchestrator
 |---|---|---|
 | Instagram | Apify `apify~instagram-scraper` | ✅ live |
 | Facebook | Apify `apify~facebook-posts-scraper` | ✅ live |
-| X / Twitter | 30 Days Agent (forked `last30days-skill`) | 🔜 planned |
-| TikTok | 30 Days Agent (forked `last30days-skill`) | 🔜 planned |
+| X / Twitter | 30 Days Agent (forked `last30days-skill`, Railway) | 🔧 Railway live — route pending |
+| TikTok | 30 Days Agent (forked `last30days-skill`, Railway) | 🔧 Railway live — route pending |
 | LinkedIn | Deferred — limited scraper support | ⏸ deferred |
 
-**X and TikTok — 30 Days Agent (coming)**
+**X and TikTok — 30 Days Agent**
 
-X and TikTok engagement will be pulled by a new **30 Days Agent** in `postglider-auto` that drives
-a forked copy of [`mvanhorn/last30days-skill`](https://github.com/mvanhorn/last30days-skill). It
-writes to the same `post_engagement` table and schema, so Butler, Weekly Architect, and the
-Autonomous Orchestrator pick up X/TikTok data automatically once it ships.
+A forked copy of [`mvanhorn/last30days-skill`](https://github.com/mvanhorn/last30days-skill) is
+hosted on **Railway** (live 2026-06-16). It writes X/TikTok engagement metrics to the same
+`post_engagement` table and schema as Instagram/Facebook, so Butler, Weekly Architect, and the
+Autonomous Orchestrator pick up X/TikTok data automatically once the `postglider-auto` route is wired.
 
-Two new env vars will be required on Cloud Run (not Vercel):
+**How it works:** PostForMe issues a `postforme_post_id` for all platforms including X and TikTok.
+After publishing, the `engagement-refresh` cron already stores the live post URL in
+`post_engagement.platform_post_url` — it just leaves engagement metrics NULL for X/TikTok (no Apify
+actor). The 30 Days Agent reads those NULL rows and fills them in using the Railway service.
+
+Three new env vars will be required on Cloud Run (not Vercel):
 
 | Variable | Purpose |
 |---|---|
 | `XAI_API_KEY` | X / Twitter access via xAI Grok API |
 | `SCRAPECREATORS_API_KEY` | TikTok (and Instagram/Threads fallback) |
+| `DAYS30_RAILWAY_URL` | Base URL of the Railway-hosted last30days service |
 
 See `postglider-auto/docs/adr/ADR002-30days-agent-x-tiktok.md` for the decision record.
 
