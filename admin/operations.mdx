@@ -595,6 +595,9 @@ audience response rather than AI intuition alone.
 | **Migration** | `supabase/migrations/20260615002000_post_engagement.sql` | `public.post_engagement` table — one row per `(postforme_post_id, platform)`, updated daily |
 | **Migration** | `supabase/migrations/20260615003000_generated_ideas_postforme_post_id.sql` | Adds `postforme_post_id` column to `generated_ideas` so autonomous and Tinder-path posts are tracked |
 | **Cron endpoint** | `app/api/cron/engagement-refresh/route.ts` | Runs daily at 14:00 UTC. Fetches platform URLs from PostForMe, pulls engagement metrics via Apify. |
+| **Butler** | `lib/agents/butler.ts` | Fetches engagement boosts in parallel with vault images; applies ±15% sort multiplier to pillar scores; injects top-performing pillar into the GPT-4o-mini scoring prompt. |
+| **Weekly Architect** | `app/api/weekly-architect/route.ts` + `lib/utils/orchestrator.ts` | Fetches engagement (Scan E), derives `pillarScores`, passes them to `buildArchitectPlan` which uses them to set the slot-per-pillar quota while cadence still governs which days. Returns `engagementHint` to the client. |
+| **Autonomous Orchestrator** | `app/api/autonomous/orchestrator/route.ts` | Derives full 3Ps quota from engagement; injects signal block into every agent prompt; stores used quota in `batch_generation_jobs.result.quotaUsed`. |
 | **vercel.json** | `vercel.json` | Cron registered at `0 14 * * *` |
 
 ### How it works
@@ -656,6 +659,32 @@ ENGAGEMENT SIGNAL (last 30 days, this business):
 This closes the feedback loop: Gemini generates content → user publishes → Apify measures
 response → Orchestrator reads `post_engagement` → next batch reflects real audience response.
 
+### Butler integration
+
+Butler runs `getEngagementBoosts(userId)` on every call, in parallel with the vault image fetch (no added latency). It returns a per-pillar multiplier in the range 0.85–1.15:
+
+- Fetches `post_engagement` for the last 30 days, deduplicates by `postforme_post_id`
+- Requires ≥5 posts per pillar before computing a boost — below that, all multipliers are 1.0 (no effect)
+- Applies the multiplier to the final `butler_score` used for sorting — AI scoring stays authoritative; engagement nudges ordering by at most ±15%
+- The top-performing pillar is also injected into the GPT-4o-mini scoring prompt as: *"personalize posts earn the most likes and comments from this business's real followers — weight gap_fill higher for ideas in this category"*
+
+**Practical effect for admins:** For a new account with no engagement data, Butler behaves exactly as before. Once an account accumulates 5+ published posts per pillar (tracked via `postforme_post_id`), Butler's top-ranked ideas will organically skew toward the pillar the audience actually responds to.
+
+### Weekly Architect integration
+
+The Weekly Architect adds a Scan E (engagement fetch) alongside Scans A–D. The signal flows through two mechanisms:
+
+**Slot quota** — instead of the fixed cadence giving each day a category, `buildEngagementDayCategories()` in `lib/utils/orchestrator.ts` computes how many slots each pillar should get (proportional to engagement scores, min 1 per pillar), then uses `CADENCE_DAY_PRIORITY` to decide *which days* each pillar occupies. The top-scoring pillar gets its cadence-preferred days first; lower-scoring pillars fill remaining days.
+
+Example: if engagement says personalize 3× > promote, and the week has 7 days:
+- Personalize gets ~3 slots → Friday, Saturday, Sunday (its cadence-preferred days)
+- Provide gets ~3 slots → Monday, Thursday + one overflow day
+- Promote gets 1 slot → Tuesday (its top cadence day; Wednesday goes to the next-highest pillar)
+
+**Client hint** — the API response now includes `engagementHint: { highPillar, dataPoints, note }` so the Architect UI can display a contextual tip (e.g. *"Your personalize posts averaged the highest engagement last month — the plan has been weighted accordingly"*). Returns `null` when engagement data is insufficient.
+
+Falls back to the standard cadence assignment when all pillars have fewer than 5 posts.
+
 ### Common admin queries
 
 **See engagement data for a user (last 30 days, by pillar):**
@@ -705,7 +734,7 @@ WHERE user_id = '<uuid>'
   AND content_category IS NOT NULL
 GROUP BY content_category;
 ```
-If any pillar shows fewer than 5 unique posts, the Orchestrator falls back to a neutral score for it. This is expected for new accounts — the system will self-correct as more posts accumulate engagement data.
+If any pillar shows fewer than 5 unique posts, all three consumers (Orchestrator, Butler, Weekly Architect) fall back gracefully — the Orchestrator uses the default 2/3/2 quota, Butler applies no sort boost, and the Architect uses the standard cadence day assignment. This is expected for new accounts and resolves automatically as posts accumulate.
 
 ### Dependencies
 

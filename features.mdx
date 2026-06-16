@@ -107,7 +107,8 @@ PostGlider tracks real likes, comments, and reach from your published posts (via
 For example: if your "Personalize" posts (team stories, behind-the-scenes) consistently outperform your "Promote" posts, PostGlider will weight next week's content toward more Personalize and fewer Promote — within healthy content balance bounds.
 
 A few things to know:
-- **It takes time to kick in.** The system requires at least 5 published posts per content type before it considers that type's engagement reliable enough to influence the mix. Until then, it falls back to the standard 2 Promote / 3 Provide / 2 Personalize default.
-- **Changes are gradual.** The mix shifts by at most 1 post per type per week — no single viral post will flip your entire content strategy overnight.
+- **It requires a minimum sample.** The system needs at least 5 published posts per content type before it considers that type's engagement reliable enough to influence recommendations. Until then, everything falls back to the standard defaults — no behavior change for new accounts.
+- **Changes are gradual.** For the Autonomous weekly system, the content mix shifts by at most 1 post per type per week — a single viral post won't flip your entire strategy overnight.
 - **Comments count more than likes.** The scoring formula weights comments 3× over likes, treating them as a stronger signal of genuine audience engagement.
 - **Multi-platform posts count once.** If the same post goes to both Instagram and Facebook, only the higher-performing platform counts toward your pillar score.
+- **Three places use this signal.** Butler (idea ranking), the Weekly Architect (slot allocation), and Autonomous Weekly Content (post quota) all draw from the same engagement data — so the signal strengthens across your entire PostGlider experience as your post history grows.
