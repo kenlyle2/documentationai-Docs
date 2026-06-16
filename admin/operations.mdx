@@ -626,16 +626,26 @@ post_engagement (
 )
 ```
 
-### Autonomous Orchestrator input (next)
+### Autonomous Orchestrator integration (live as of 2026-06-15)
 
-The Orchestrator will query `post_engagement` grouped by `content_category` before building
-each agent's context block, injecting a signal like:
+Before generating any posts, the Orchestrator calls `getEngagementSummary(userId)` and runs
+`deriveQuota()` to determine this week's 3Ps split. The quota is no longer hardcoded — it is
+derived from real audience data and injected into every agent prompt:
 
-> "Personalize posts average 47 likes / 8 comments. Promote posts average 12 likes / 2 comments.
-> Lean toward Personalize content for this batch."
+```
+ENGAGEMENT SIGNAL (last 30 days, this business):
+  Personalize : avg 47 likes · 8 comments · 500 reach (5 posts)
+  Provide     : avg 31 likes · 5 comments · 300 reach (6 posts)
+  Promote     : avg 12 likes · 2 comments · 150 reach (4 posts)
+→ This week's quota: 3 Personalize / 3 Provide / 1 Promote
+```
+
+Pillar score = `avg_likes + avg_comments×3 + avg_reach×0.01`. Falls back to the default 2/3/2
+split when fewer than 2 posts exist per pillar. Provide absorbs rounding drift (bounds: 1–5);
+Promote and Personalize are capped at 3 each.
 
 This closes the feedback loop: Gemini generates content → user publishes → Apify measures
-response → Orchestrator learns which P-pillar resonates → next batch reflects real performance.
+response → Orchestrator reads `post_engagement` → next batch reflects real audience response.
 
 ### Dependencies
 
