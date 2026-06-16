@@ -582,6 +582,79 @@ Configurable via `/admin → Defaults tab`. Changes take effect on the next page
 
 ---
 
+## Engagement by Content P — Post Performance Feedback Loop
+
+PostGlider tracks real-world engagement (likes, comments, reach) on published posts and feeds that
+data into Butler and the Autonomous Orchestrator so content recommendations are grounded in actual
+audience response rather than AI intuition alone.
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Migration** | `supabase/migrations/20260615002000_post_engagement.sql` | `public.post_engagement` table — one row per `(postforme_post_id, platform)`, updated daily |
+| **Cron endpoint** | `app/api/cron/engagement-refresh/route.ts` | Runs daily at 14:00 UTC. Fetches platform URLs from PostForMe, pulls engagement metrics via Apify. |
+| **vercel.json** | `vercel.json` | Cron registered at `0 14 * * *` |
+
+### How it works
+
+1. Queries `week_pack_items JOIN week_packs` for all posts that have a `postforme_post_id` (i.e., were published via PostForMe) and haven't been checked in the last 20 hours.
+2. Calls PostForMe `socialPostResults.list({ post_id })` to get the live platform post URL per social account. This URL is only available after PostForMe finishes processing the post — it is **not** returned at schedule time.
+3. Calls the appropriate Apify actor per platform to scrape engagement metrics:
+   - Instagram: `apify~instagram-scraper` → `likesCount`, `commentsCount`, `videoViewCount`
+   - Facebook: `apify~facebook-posts-scraper` → `likes`, `comments`, `shares`
+   - LinkedIn: deferred (limited Apify coverage)
+4. Upserts to `post_engagement` — one row per `(postforme_post_id, platform)`, updated on each daily check.
+
+### Schema
+
+```sql
+post_engagement (
+  postforme_post_id   text,       -- PostForMe internal post ID
+  user_id             uuid,       -- post owner
+  platform            text,       -- 'instagram' | 'facebook' | 'linkedin' | ...
+  platform_post_url   text,       -- live URL on the platform
+  platform_post_id    text,       -- platform-native post ID
+  content_category    text,       -- 'Provide' | 'Promote' | 'Personalize' (from week_pack_items)
+  likes               integer,
+  comments            integer,
+  reach               integer,
+  impressions         integer,
+  shares              integer,
+  saves               integer,
+  checked_at          timestamptz -- when this row was last updated
+)
+```
+
+### Autonomous Orchestrator input (next)
+
+The Orchestrator will query `post_engagement` grouped by `content_category` before building
+each agent's context block, injecting a signal like:
+
+> "Personalize posts average 47 likes / 8 comments. Promote posts average 12 likes / 2 comments.
+> Lean toward Personalize content for this batch."
+
+This closes the feedback loop: Gemini generates content → user publishes → Apify measures
+response → Orchestrator learns which P-pillar resonates → next batch reflects real performance.
+
+### Dependencies
+
+| Env var | Where | Purpose |
+|---|---|---|
+| `APIFY_API_KEY` | Vercel (production) | Apify scraping — cron degrades gracefully without it (stores platform URL only) |
+| `POSTFORME_API_KEY` | Vercel (production) | PostForMe client — reads `socialPostResults` |
+
+### Dry run
+
+```
+GET /api/cron/engagement-refresh?dry=true
+Authorization: Bearer <CRON_SECRET>
+```
+
+Returns `{ checked, inserted, dry: true }` without writing to `post_engagement`.
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Used by |
@@ -595,3 +668,4 @@ Configurable via `/admin → Defaults tab`. Changes take effect on the next page
 | `REPLICATE_API_KEY` | Image generation (person reference) |
 | `WP_API_APP_PASSWORD` | `apiguy` application password for subsite provisioning |
 | `WP_API_BASE_URL` | `https://mypostglider.website` |
+| `APIFY_API_KEY` | `engagement-refresh` cron — Apify actor scraping for post metrics |
