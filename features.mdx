@@ -98,3 +98,16 @@ Available to all authenticated users, these signals inform timing and format dec
 | **Day Signal** | Best days to post by your industry and platform |
 | **Format Signal** | Whether video, carousel, or single image performs best for your niche |
 | **Hashtag Signal** | Outperforming, underperforming, and fresh hashtag recommendations by niche |
+| **Content Performance** | Which content type — Promote, Provide, or Personalize — earns the most engagement from your actual audience. Used to shape the mix of next week's AI-generated content. |
+
+### Content Performance signal
+
+PostGlider tracks real likes, comments, and reach from your published posts (via your connected social accounts) and uses that data to automatically tune how many Promote, Provide, and Personalize posts are generated each week.
+
+For example: if your "Personalize" posts (team stories, behind-the-scenes) consistently outperform your "Promote" posts, PostGlider will weight next week's content toward more Personalize and fewer Promote — within healthy content balance bounds.
+
+A few things to know:
+- **It takes time to kick in.** The system requires at least 5 published posts per content type before it considers that type's engagement reliable enough to influence the mix. Until then, it falls back to the standard 2 Promote / 3 Provide / 2 Personalize default.
+- **Changes are gradual.** The mix shifts by at most 1 post per type per week — no single viral post will flip your entire content strategy overnight.
+- **Comments count more than likes.** The scoring formula weights comments 3× over likes, treating them as a stronger signal of genuine audience engagement.
+- **Multi-platform posts count once.** If the same post goes to both Instagram and Facebook, only the higher-performing platform counts toward your pillar score.

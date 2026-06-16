@@ -593,18 +593,22 @@ audience response rather than AI intuition alone.
 | Component | Path | Purpose |
 |---|---|---|
 | **Migration** | `supabase/migrations/20260615002000_post_engagement.sql` | `public.post_engagement` table — one row per `(postforme_post_id, platform)`, updated daily |
+| **Migration** | `supabase/migrations/20260615003000_generated_ideas_postforme_post_id.sql` | Adds `postforme_post_id` column to `generated_ideas` so autonomous and Tinder-path posts are tracked |
 | **Cron endpoint** | `app/api/cron/engagement-refresh/route.ts` | Runs daily at 14:00 UTC. Fetches platform URLs from PostForMe, pulls engagement metrics via Apify. |
 | **vercel.json** | `vercel.json` | Cron registered at `0 14 * * *` |
 
 ### How it works
 
-1. Queries `week_pack_items JOIN week_packs` for all posts that have a `postforme_post_id` (i.e., were published via PostForMe) and haven't been checked in the last 20 hours.
-2. Calls PostForMe `socialPostResults.list({ post_id })` to get the live platform post URL per social account. This URL is only available after PostForMe finishes processing the post — it is **not** returned at schedule time.
-3. Calls the appropriate Apify actor per platform to scrape engagement metrics:
+1. Sources posts from **two places** (union, deduplicated by `postforme_post_id`):
+   - `week_pack_items JOIN week_packs` — posts scheduled via the Pack/Butler flow
+   - `generated_ideas WHERE postforme_post_id IS NOT NULL` — autonomous-generated posts and Tinder/swipe-path posts. The `postforme_post_id` is written back to `generated_ideas` immediately after `scheduleSocialPost()` succeeds.
+2. Skips posts already checked in the last 20 hours.
+3. Calls PostForMe `socialPostResults.list({ post_id })` to get the live platform post URL per social account. This URL is only available after PostForMe finishes processing — it is **not** available at schedule time.
+4. Calls the appropriate Apify actor per platform to scrape engagement metrics:
    - Instagram: `apify~instagram-scraper` → `likesCount`, `commentsCount`, `videoViewCount`
    - Facebook: `apify~facebook-posts-scraper` → `likes`, `comments`, `shares`
    - LinkedIn: deferred (limited Apify coverage)
-4. Upserts to `post_engagement` — one row per `(postforme_post_id, platform)`, updated on each daily check.
+5. Upserts to `post_engagement` — one row per `(postforme_post_id, platform)`, updated on each daily check.
 
 ### Schema
 
@@ -615,7 +619,7 @@ post_engagement (
   platform            text,       -- 'instagram' | 'facebook' | 'linkedin' | ...
   platform_post_url   text,       -- live URL on the platform
   platform_post_id    text,       -- platform-native post ID
-  content_category    text,       -- 'Provide' | 'Promote' | 'Personalize' (from week_pack_items)
+  content_category    text,       -- 'Provide' | 'Promote' | 'Personalize'
   likes               integer,
   comments            integer,
   reach               integer,
@@ -634,18 +638,74 @@ derived from real audience data and injected into every agent prompt:
 
 ```
 ENGAGEMENT SIGNAL (last 30 days, this business):
-  Personalize : avg 47 likes · 8 comments · 500 reach (5 posts)
-  Provide     : avg 31 likes · 5 comments · 300 reach (6 posts)
-  Promote     : avg 12 likes · 2 comments · 150 reach (4 posts)
+  Personalize : avg 47 likes · 8 comments · 500 reach (6 posts)
+  Provide     : avg 31 likes · 5 comments · 300 reach (7 posts)
+  Promote     : avg 12 likes · 2 comments · 150 reach (5 posts)
 → This week's quota: 3 Personalize / 3 Provide / 1 Promote
 ```
 
-Pillar score = `avg_likes + avg_comments×3 + avg_reach×0.01`. Falls back to the default 2/3/2
-split when fewer than 2 posts exist per pillar. Provide absorbs rounding drift (bounds: 1–5);
-Promote and Personalize are capped at 3 each.
+**How the quota is derived:**
+
+- Pillar score = `avg_likes + avg_comments×3 + avg_reach×0.01` (comments weighted 3× for higher intent)
+- **Minimum 5 posts** per pillar required before a pillar score is used — below this, engagement averages are too volatile (a single viral post with 4 normal ones swings the whole average). Pillars below threshold get a neutral fallback score of 1.
+- Falls back entirely to the default 2/3/2 split when all pillars are below threshold.
+- Provide absorbs rounding drift (bounds: 1–5); Promote and Personalize are capped at 3 each.
+- **±1 weekly cap**: each pillar can shift at most ±1 from the previous week's quota. Prevents a single viral post from whiplashing the quota. The previous quota is stored in `batch_generation_jobs.result.quotaUsed` and read at the start of each batch run.
+- Before averaging, `post_engagement` rows are **deduplicated by `postforme_post_id`**: a post published to both Instagram and Facebook creates two rows, but only the platform with the higher engagement score counts toward the pillar average.
 
 This closes the feedback loop: Gemini generates content → user publishes → Apify measures
 response → Orchestrator reads `post_engagement` → next batch reflects real audience response.
+
+### Common admin queries
+
+**See engagement data for a user (last 30 days, by pillar):**
+```sql
+SELECT content_category, platform,
+       AVG(likes)::int    AS avg_likes,
+       AVG(comments)::int AS avg_comments,
+       AVG(reach)::int    AS avg_reach,
+       COUNT(*)           AS row_count
+FROM post_engagement
+WHERE user_id = '<uuid>'
+  AND checked_at > now() - interval '30 days'
+GROUP BY content_category, platform
+ORDER BY content_category, platform;
+```
+
+**See what quota the Autonomous system used last week:**
+```sql
+SELECT batch_start, status,
+       result->'quotaUsed'->>'promoteCount'     AS promote,
+       result->'quotaUsed'->>'provideCount'     AS provide,
+       result->'quotaUsed'->>'personalizeCount' AS personalize,
+       result->'quotaUsed'->>'engagementDriven' AS engagement_driven
+FROM autonomous.batch_generation_jobs
+WHERE user_id = '<uuid>'
+  AND status = 'completed'
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
+**Check which generated_ideas posts have been linked to PostForMe (and are therefore trackable):**
+```sql
+SELECT id, content_category, postforme_post_id, created_at
+FROM generated_ideas
+WHERE user_id = '<uuid>'
+  AND postforme_post_id IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+**Why is a pillar not influencing the quota?** Check if it has fewer than 5 tracked posts:
+```sql
+SELECT content_category, COUNT(DISTINCT postforme_post_id) AS unique_posts
+FROM post_engagement
+WHERE user_id = '<uuid>'
+  AND checked_at > now() - interval '30 days'
+  AND content_category IS NOT NULL
+GROUP BY content_category;
+```
+If any pillar shows fewer than 5 unique posts, the Orchestrator falls back to a neutral score for it. This is expected for new accounts — the system will self-correct as more posts accumulate engagement data.
 
 ### Dependencies
 
