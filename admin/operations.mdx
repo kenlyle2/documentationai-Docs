@@ -736,6 +736,32 @@ GROUP BY content_category;
 ```
 If any pillar shows fewer than 5 unique posts, all three consumers (Orchestrator, Butler, Weekly Architect) fall back gracefully — the Orchestrator uses the default 2/3/2 quota, Butler applies no sort boost, and the Architect uses the standard cadence day assignment. This is expected for new accounts and resolves automatically as posts accumulate.
 
+### Platform coverage
+
+| Platform | Scraper | Status |
+|---|---|---|
+| Instagram | Apify `apify~instagram-scraper` | ✅ live |
+| Facebook | Apify `apify~facebook-posts-scraper` | ✅ live |
+| X / Twitter | 30 Days Agent (forked `last30days-skill`) | 🔜 planned |
+| TikTok | 30 Days Agent (forked `last30days-skill`) | 🔜 planned |
+| LinkedIn | Deferred — limited scraper support | ⏸ deferred |
+
+**X and TikTok — 30 Days Agent (coming)**
+
+X and TikTok engagement will be pulled by a new **30 Days Agent** in `postglider-auto` that drives
+a forked copy of [`mvanhorn/last30days-skill`](https://github.com/mvanhorn/last30days-skill). It
+writes to the same `post_engagement` table and schema, so Butler, Weekly Architect, and the
+Autonomous Orchestrator pick up X/TikTok data automatically once it ships.
+
+Two new env vars will be required on Cloud Run (not Vercel):
+
+| Variable | Purpose |
+|---|---|
+| `XAI_API_KEY` | X / Twitter access via xAI Grok API |
+| `SCRAPECREATORS_API_KEY` | TikTok (and Instagram/Threads fallback) |
+
+See `postglider-auto/docs/adr/ADR002-30days-agent-x-tiktok.md` for the decision record.
+
 ### Dependencies
 
 | Env var | Where | Purpose |
