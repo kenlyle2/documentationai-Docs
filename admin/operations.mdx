@@ -786,6 +786,67 @@ Returns `{ checked, inserted, dry: true }` without writing to `post_engagement`.
 
 ---
 
+## GMB Testimonials — Wall of Fame Curation
+
+Business owners can flag specific Google Business Profile reviews as featured testimonials and
+tag them to a service, so the Autonomous agents surface the *right* social proof instead of just
+the highest-rated review.
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Migration** | `supabase/migrations/20260618140000_autonomous_gmb_testimonials_curation.sql` | Adds `external_review_id`, `is_featured`, `service_id`, `service_tag_source` to `autonomous.gmb_testimonials`; rewrites the upsert RPC to preserve curation on refetch |
+| **Prefetch agent** | `app/api/autonomous/prefetch/gmb-testimonials/route.ts` | After banking reviews, calls Google Gemini 2.5 Flash once per batch to classify any untagged reviews against the business's `business_services` list |
+| **Settings UI** | `components/settings/TestimonialsCard.tsx` (My Vibe → `/settings`) | Star to feature, dropdown to assign/override service tag, eye toggle to hide a review from agents without deleting it |
+| **Server actions** | `lib/actions/testimonialsActions.ts` | `listTestimonialsAction`, `toggleTestimonialFeaturedAction`, `toggleTestimonialActiveAction`, `setTestimonialServiceAction` |
+
+### Operational notes
+
+- The Gemini 2.5 Flash tagging call only fires when there are rows with `service_id IS NULL` —
+  it does not re-scan already-tagged reviews, so call volume is bounded to new reviews per batch
+  (typically 0–5), not the full review history.
+- An owner's manual service tag always wins — once any tag (AI or manual) is set on a row, the
+  AI step never overwrites it.
+- A review Google returns again on a later fetch (matched by `external_review_id`) keeps its
+  `is_featured`/`service_id` — only the rating/comment/author fields refresh.
+- The Orchestrator now requests up to 8 banked testimonials per batch (was 3), ordered
+  featured-first, each annotated with its service tag in the Promote/Personalize prompt context.
+
+---
+
+## Competitive Intelligence Agent (postglider-auto)
+
+A fifth autonomous agent, self-repairing Predis.ai competitor extraction, runs as its own
+Cloud Run service rather than inside `postglider-autonomous` because it needs a real Chromium
+binary the main app's image doesn't carry.
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Migration** | `supabase/migrations/20260622200000_autonomous_competitive_intel_predis.sql` | Adds `autonomous.predis_selectors` (selector self-repair memory) and `autonomous.competitor_intel_predis` |
+| **Selector verify/repair** | `lib/autonomous/predisSelectors.ts` | `verifySelector()` checks the stored CSS selector against the live DOM on every run, no LLM call; `repairSelector()` only fires on failure, asks Gemini Flash for a replacement, and re-verifies it before ever persisting or trusting it |
+| **Extraction** | `lib/autonomous/predisExtraction.ts` | Playwright walk of Predis.ai's Competitor Analysis dashboard, every selector resolved through the verify/repair layer above |
+| **Synthesis** | `lib/autonomous/competitiveIntelAnalysis.ts` | Deterministic signal math (format efficiency, day-of-week, theme ROI, hashtag efficiency) ported from `competitor-intel/mfystrategy/code/analyze_competitor.py` |
+| **Agent route** | `app/api/autonomous/competitor-intel-agent/route.ts` | Orchestrates extraction → synthesis → Gemini narrative → Supabase write |
+| **Cloud Run service** | `Dockerfile.competitor-intel-agent` + `cloudbuild.competitor-intel-agent.yaml` | Deploys as `postglider-competitor-intel-agent`, a sibling service to `postglider-autonomous` |
+
+### Operational notes
+
+- This is the only autonomous agent that requires its own Cloud Run service — it needs
+  `PREDIS_EMAIL`/`PREDIS_PASSWORD` and a Chromium binary, neither of which the main app's
+  Alpine-based image carries.
+- `autonomous.predis_selectors` is seeded with the extractor's best-guess CSS selectors so the
+  agent always has a prior to verify or repair against, rather than starting cold.
+- An unvalidated selector proposal from Gemini is never persisted or used — `repairSelector()`
+  re-runs `verifySelector()` against its own proposal before accepting it.
+- As of 2026-06-22, code is written and type-checked but not yet deployed — see `TASKS.md`
+  in `postglider-auto` for the remaining rollout steps (migration apply, live dry run, Cloud Run
+  deploy, Cloud Scheduler wiring).
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Used by |
