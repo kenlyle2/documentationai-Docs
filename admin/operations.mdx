@@ -847,6 +847,53 @@ binary the main app's image doesn't carry.
 
 ---
 
+## Virality Agent (postglider-auto)
+
+Surfaces a real, attributable "this is what's working right now" citation for the Promote/
+Provide/Personalize agents — e.g. *"Ayala Bratt of Las Vegas just went viral for a tattoo post
+(10x their average engagement), following the broader trend of telling 'behind the ink' tattoo
+stories."* Lives inline in the Orchestrator, not a separate Cloud Run service.
+
+### How it works
+
+1. For every tracked competitor (`autonomous.competitor_accounts`, local + national tier), fetch
+   their recent posts and flag any post that beats *that account's own* average engagement by
+   3x or more — the comparison is always against the account's own baseline, never a global
+   threshold, since a 15,000-follower account and a 400-follower account have completely
+   different "doing unusually well" lines.
+2. Separately, the existing trending-search pass (`generateTrendingHooks()`, Reddit/Pinterest/
+   TikTok/Instagram keyword search) runs in parallel.
+3. If the outlier post's caption topically overlaps a detected trend, the two get cited
+   together. If not, the local outlier is cited alone — the agent never forces an unreal
+   connection between the two signals.
+4. Gemini writes one sentence from this, under a hard constraint: every named fact (handle,
+   location, business type, engagement multiple) must trace back to a field already verified in
+   `competitor_accounts` or to the matched trend — never invented. Location is only stated if
+   it's in the account record or literally spelled out in the post's own caption/hashtags.
+5. The result is injected into the same prompt block all three sub-agents read, framed as
+   inspiration ("use as inspiration for an angle, not verbatim") — like the trending-hooks
+   block, it doesn't always end up reflected in that week's actual posts.
+
+### Known limitation — content is inferred from caption text only
+
+Many posts (especially Instagram Reels) carry zero descriptive caption text — just hashtags.
+Hashtags signal reach intent, not actual content. The agent is instructed to describe the post
+generically ("a tattoo post") rather than guess a specific visual theme from hashtags alone, but
+that means it currently can't describe a real visual hook it has no text to read off. Two
+proposed fixes (single-frame image check via the thumbnail already fetched; full Gemini video
+understanding) are written up in `TASKS.md` in `postglider-auto`, not yet built.
+
+### Files
+
+| Component | Path |
+|---|---|
+| Outlier detection + synthesis | `lib/autonomous/viralityAgent.ts` |
+| Standalone verification route | `app/api/autonomous/prefetch/virality/route.ts` |
+| Orchestrator wiring | `app/api/autonomous/orchestrator/route.ts` (`generateViralityCitation`, alongside `generateTrendingHooks`) |
+| Full origin story | `docs/virality-pipeline-history.md` in `postglider-auto` |
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Used by |
