@@ -894,6 +894,73 @@ understanding) are written up in `TASKS.md` in `postglider-auto`, not yet built.
 
 ---
 
+## TourGuide Agent — AI-Native Guided Tour
+
+TourGuide is the in-app help agent — the floating "?" button (bottom-right, all authenticated
+pages). A user types a question in plain English; Gemini Flash returns a personalized
+`TourStep[]` sequence, which the client renders as a spotlight-and-tooltip walkthrough over the
+real UI. No tour content is hardcoded — every step is generated fresh per call, conditioned on
+what the user has actually completed.
+
+In the XPRIZE Mycroft/TourGuide framing (see `docs/spec-mycroft-agent.md` in `postglider-auto`),
+TourGuide is "Sherlock" — Mycroft (the synthesis agent) decides *what* a user needs to see;
+TourGuide does the interface legwork to show them.
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Route** | `app/api/autonomous/guide/route.ts` | `POST /api/autonomous/guide` — verifies Supabase JWT, builds the prompt, calls Gemini Flash, returns `{ steps: TourStep[] }` |
+| **Entry point** | `components/GuideInput.tsx` | Floating help button; wired into `AppShell`, rendered whenever `userId` + `userAttributes` are present (i.e. on every authenticated page) |
+| **Renderer** | `components/GuidedTour.tsx` | Resolves each step's `target` against the DOM, draws the spotlight + positioned tooltip, handles next/back/dismiss |
+| **Selector registry** | `lib/autonomous/tourSelectors.ts` | Maps logical keys (`nav-create`, `batch-trigger`, etc.) to `[data-tour="..."]` CSS selectors |
+
+### How it works
+
+1. `GuideInput` collects the user's question plus their onboarding signals (`profile_complete`,
+   `social_connected`, `vault_has_images`, `first_batch_done`) and current path, and POSTs to the
+   guide endpoint with the user's Supabase access token.
+2. The route builds one prompt containing: a hardcoded product-capabilities primer
+   (`PRODUCT_CONTEXT`), the full `TOUR_SELECTORS` map (so Gemini can only reference real UI
+   targets), and the user's current state.
+3. Gemini Flash (`AGENT_MODEL`, JSON response mode) returns up to 8 `TourStep` objects. Each step
+   has a `target` (selector key or `"center"` for a no-anchor explainer step), `title`, `content`,
+   `placement`, and optionally a `navigate`/`click`/`fill` action.
+4. `GuidedTour` walks the steps client-side — no further network calls — scrolling each target
+   into view and positioning the tooltip relative to it.
+
+### Cross-origin setup
+
+`postglider-auto` is itself the deployed app at `autonomous.postglider.com`, so same-origin calls
+need no special config. If `app.postglider.com` (core) ever embeds `GuideInput` against this
+Cloud Run backend, set `NEXT_PUBLIC_AUTONOMOUS_URL` on that deployment — the route's
+`ALLOWED_ORIGINS` list already permits `https://app.postglider.com` plus localhost.
+
+### Selector coverage
+
+Every key in `TOUR_SELECTORS` must have a matching `data-tour="<key>"` attribute somewhere in the
+DOM, or that step silently renders with no spotlight (still functional, just un-anchored). Current
+coverage: `business-name`/`business-location`/`business-industry` (`components/profiles/ProfileForm.tsx`),
+`gmb-connect`/`instagram-connect` (`app/(app)/settings/social/page.tsx`), `batch-trigger`/
+`batch-results` (`app/(app)/generate/page.tsx`), and all `nav-*` keys (`components/sidebar.tsx`).
+
+<Callout kind="info">
+  Don't confuse `data-tour` (TourGuide, this section) with `data-usertour` (the third-party
+  UserTour product, tracked separately — see `TASKS.md` "Implement UserTour Tours" in
+  `postglider-auto`). They coexist on some of the same elements but are unrelated systems.
+</Callout>
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Button doesn't appear | `userId`/`userAttributes` missing from `AppShell` props — check the calling layout passed them |
+| 401 from the guide endpoint | Missing/expired Supabase session token in the request |
+| 500, "Agent returned invalid JSON" | Gemini didn't return valid JSON — check `GEMINI_API_KEY` is set and `AGENT_MODEL` hasn't been retired upstream |
+| Tour step renders with no spotlight | Step's `target` key has no matching `data-tour` attribute in the DOM — check `lib/autonomous/tourSelectors.ts` against the live page |
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Used by |
