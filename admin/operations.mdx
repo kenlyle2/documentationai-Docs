@@ -155,6 +155,87 @@ Test accounts (`kenlyle+2@gmail.com`) are not WooCommerce subscribers and never 
 
 ---
 
+## Generated Ideas — Stage Lifecycle
+
+Every row in `generated_ideas` carries a `stage` column that drives what the user sees
+and what the autonomous agents can touch.
+
+### Stage definitions
+
+| Stage | Meaning |
+|---|---|
+| `discover` | Freshly generated — in the user's active TinderReview batch awaiting a decision |
+| `backlog` | Deferred for later — scored by Butler, eligible for the backlog mini-tinder chip |
+| `approved` | User has committed to this idea — appears in the "N ideas ready to review" chip and can be batched |
+| `rejected` | Permanently dismissed — never surfaces again in any UI or agent flow |
+
+### How ideas reach `backlog`
+
+1. **Autonomous agent** — the weekly Cloud Run batch (`insertGeneratedIdeas`) inserts content
+   directly at `stage: 'backlog'`. This is the primary source. Butler then scores and ranks
+   these ideas so the best ones surface first.
+2. **Bank It button** — in a fresh-batch TinderReview the user clicks Bank It to defer an idea
+   they like but don't want this week. Sets `stage: 'backlog'` immediately.
+
+### How ideas reach `approved`
+
+1. **Approve in TinderReview** (fresh batch) — user taps Approve. In Passenger Mode this also
+   auto-schedules the post immediately via PostForMe.
+2. **Save** in the single-idea result view — user saves a single generated post.
+3. **Add to Batch** in the backlog mini-tinder — user pulls a backlog/approved idea into their
+   next content batch (sets `stage: 'approved'` immediately so the slot survives a page refresh).
+4. **History select** — user picks a past idea from the history panel in the Content Studio,
+   which marks it approved and loads it into the result view.
+
+### Three-strikes pruning
+
+Butler and the backlog mini-tinder both use `record_three_strikes()` to prune weak ideas.
+The counter is `butler_skip_count` on `generated_ideas`.
+
+| Action | Strike recorded? | Stage effect |
+|---|---|---|
+| Butler suggests an idea and user skips it | ✅ +1 | At 3: auto-`rejected` |
+| User clicks Skip in the backlog mini-tinder | ✅ +1 | At 3: auto-`rejected`; below 3: stage unchanged |
+| User clicks Add to Batch | ✗ | Sets `approved` |
+| Image generation fails, credits refunded | ✅ +1 to `image_gen_fail_count` | At 3: auto-`rejected` |
+
+Two separate counters, same threshold (3), same function:
+
+```sql
+-- Manual strike (e.g. to test pruning)
+SELECT record_three_strikes(
+    'generated_ideas',
+    '<idea_uuid>',
+    'butler_skip_count',  -- or 'image_gen_fail_count'
+    3,
+    'stage',
+    'rejected'
+);
+```
+
+### The backlog mini-tinder chip
+
+When a user has `approved` or `backlog` ideas for the selected profile, a chip appears
+inline on the batch-size row of the Content Studio: **"N ideas ready to review."**
+
+Clicking opens the standard TinderReview with those ideas pre-loaded and relabelled:
+
+| Button | Action |
+|---|---|
+| **Add to Batch** | Slots the idea (text + image) into the next empty PostBoxList accordion. Sets `stage: 'approved'` in DB. No credits charged. |
+| **Skip** | Records one strike (`butler_skip_count + 1`). At 3 strikes the idea is auto-rejected. Stage is NOT immediately changed to `rejected` — the idea stays in the pool until it hits the threshold. |
+| **Edit Caption** | Standard inline caption edit before adding. |
+| Bank It | **Not shown** — every pass in the backlog pool counts as a strike, so soft-deferring without penalty is intentional removed. |
+
+**Admin reset snippet** — restore ideas after test runs:
+```sql
+UPDATE generated_ideas
+SET stage = 'backlog', butler_skip_count = 0
+WHERE id IN ('<uuid1>', '<uuid2>');
+```
+
+---
+
 ## Deployments
 
 **Deploy edge function:**
@@ -844,6 +925,56 @@ binary the main app's image doesn't carry.
 - As of 2026-06-22, code is written and type-checked but not yet deployed — see `TASKS.md`
   in `postglider-auto` for the remaining rollout steps (migration apply, live dry run, Cloud Run
   deploy, Cloud Scheduler wiring).
+
+### ScrapeCreators-sourced challenger pipeline (2026-06-24)
+
+A second, source-agnostic implementation of the same agent, built to test whether the Predis.ai
+dashboard scrape above is even necessary. `computeSignals()`/`computeThemeRoi()` already operate
+purely on `RawCompetitorData` and don't care where the post list came from — this pipeline fetches
+that same shape directly from ScrapeCreators (`/v1/instagram/profile` + paginated
+`/v2/instagram/user/posts`) instead of scraping a UI. **Status: promoted to a real agent +
+route — `lib/autonomous/scrapeCreatorsCompetitiveIntelAgent.ts`
+(`runScrapeCreatorsCompetitiveIntelAgent()`) and `POST /api/autonomous/scrapecreators-competitor-intel-agent`.**
+No Chromium needed, so unlike the Predis agent above this one runs inside the main
+`postglider-autonomous` Cloud Run service rather than a dedicated one. Writes to the same
+`autonomous.competitor_intel_predis` table as the Predis pipeline, distinguished by a `source`
+column (`'predis' | 'scrapecreators'`) — not yet in the Orchestrator's automatic trigger path
+(manual/onboarding-triggered call only for now). Full narrative and real measured costs are in
+`docs/BUILD-HISTORY.md`'s 2026-06-24 entries.
+
+**Theme/tag generation is not one mechanism — three different tiers, worth knowing before
+treating any of it as a stable taxonomy:**
+
+| Axis | Vocabulary source | What Gemini does |
+|---|---|---|
+| Topic (e.g. "Founder Reflections / Personal Growth Journey") | **None — 100% AI-invented per run.** No fixed category list exists anywhere in the code. | Invents both the grouping and the labels from raw captions, constrained only by structural rules (mutual exclusivity, no catch-all bucket, specific-enough labels, split by framing not just subject) |
+| Framing, commercial intent | **Fixed, human-authored** (5 framing values, 2 intent values, hardcoded in `scrapecreators-competitor-intel.mjs`) | Classification only — picks one of the fixed values per post, cannot invent a new one |
+| Target persona | **Hybrid** — Gemini proposes 2-4 personas per account (not fixed across accounts), inside human-set guardrails (must include a core-audience default) | Invents the vocabulary for this account, then classifies each post against its own list |
+
+<Callout kind="warning">
+Topic clustering is **not deterministic run-to-run.** Re-running the identical prompt against
+identical captions on different days produced 6 clusters one run and 4 (with one cluster
+absorbing 52% of all posts) the next, before a prompt hardening pass cut that variance down —
+even after hardening, repeat runs still varied 6-8 clusters. There is no human review/approval
+step before this output reaches a report. Don't build any feature that assumes a theme name is
+stable across weeks (e.g. a trend line per theme) without first adding a theme-identity/review
+mechanism — none exists today.
+</Callout>
+
+**Onboarding integration — not yet built, design only.** This pipeline depends on
+`autonomous.competitor_accounts` already having a resolved handle, which today only comes from
+the existing bi-weekly `prefetch/discovery` cron (Wednesday 02:00 UTC) — there's no synchronous
+path from "client signs up" to "first competitor report" yet. A full run also takes multiple
+minutes (4 sequential Gemini calls + ~11 paginated ScrapeCreators fetches in testing), so it
+cannot run inline during onboarding regardless — it needs to be a background job with a
+ready-notification, the same async pattern other autonomous agents already use. See `TASKS.md`
+in `postglider-auto` for the open onboarding-wiring items.
+
+**Real cost per report, measured live via `usageMetadata` and ScrapeCreators' `credits_remaining`
+deltas, not estimated:** ~$0.05-0.06 for the base Predis-equivalent report (topic clustering +
+narrative), ~$0.10-0.11 if the multi-axis tagging (framing/intent/persona) section is included —
+per channel, per report. Cheap enough to give away as the default onboarding deliverable rather
+than gating behind a tier, which is the working recommendation, not yet a decision.
 
 ---
 
