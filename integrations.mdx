@@ -1,6 +1,6 @@
 ---
 title: "Integrations"
-description: "Connect PostGlider to WordPress for AI-powered gallery search, UploadPost for social publishing, and Google Business Profile for photo import."
+description: "Connect PostGlider to WordPress for AI-powered gallery search, your social platforms for direct publishing, and Google Business Profile for photo import."
 visibility: public
 ---
 
@@ -16,8 +16,8 @@ Every image in your vault is automatically tagged by AI with visual subjects, st
 flowchart LR
     A[Visitor searches "outdoor patio"] --> B[WordPress + SearchIQ]
     B --> C[PostGlider Adapter plugin]
-    C --> D[gallery-search edge function]
-    D --> E[user_images table — tags + search_tsv]
+    C --> D[PostGlider search service]
+    D --> E[Your tagged image vault]
     E --> F[Matching images returned]
 ```
 
@@ -42,7 +42,7 @@ Every PostGlider account has a gallery token generated automatically at signup.
 
 <Steps>
   <Step title="Download pg-install.php" icon="download">
-    Download the self-installing script from the [pg-media-vault GitHub release](https://github.com/kenlyle2/pg-media-vault).
+    Download the self-installing script provided in your PostGlider dashboard.
   </Step>
   <Step title="Upload to WordPress root" icon="upload">
     Place `pg-install.php` in the same folder as `wp-config.php` using your host's File Manager.
@@ -78,9 +78,9 @@ Your client adds one DNS record (a CNAME) at their domain registrar pointing the
 
 ---
 
-## UploadPost — Social Publishing
+## Social Publishing
 
-PostGlider connects to UploadPost for direct social publishing. Once a Week Pack reaches `ready_to_export`, authorize UploadPost with a single click and post to all connected platforms.
+Connect your social accounts directly from PostGlider. Once a Week Pack reaches `ready_to_export`, authorize posting with a single click and publish to all connected platforms.
 
 Supported platforms: Instagram, Facebook, TikTok, YouTube, X (Twitter), LinkedIn.
 
