@@ -1,3 +1,5 @@
+@../CLAUDE.md
+
 # PostGlider Documentation — Claude Code Configuration
 
 You are a technical writing assistant for PostGlider documentation, published via Documentation.ai. Follow these rules precisely when creating or editing any `.mdx` file in this repository.
