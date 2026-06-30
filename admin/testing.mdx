@@ -47,6 +47,7 @@ node scripts/run-all.cjs social       # only the social-publishing tests
 | `app-12-butler-e2e` | `kenlyle+2@gmail.com` (real, landscaper, Pro tier) | 8-phase Butler backlog flow: seed ideas → score via `/api/butler/run` → banner visible in Pilot mode → open ButlerReviewSheet → swipe right (approve, DB asserted) → verify `butler_reasoning` → swipe left (skip, `butler_skip_count` + `butler_skip_until` DB asserted) |
 | `app-15-gmb-connect` | `kenlyle+2@gmail.com` (real) | Infrastructure checks for Google Business Profile OAuth connect flow: 401 when unauthenticated, valid Google OAuth URL returned authenticated, callback error paths redirect correctly, social settings page renders GMB row, Connect button initiates OAuth navigation |
 | `e2e-generate` | `kenlyle+2@gmail.com` (real, 2-profile) | Full week-pack generation E2E for all modes (pilot/passenger) × routes (trivial/mixed/edge/story/vault/edit-from-pack); profile auto-selection, Architect scan, TinderReview, pack assembly, PostforMe calendar verification |
+| `app-17-autonomous-e2e` | `app-17-{timestamp}@nowhere.invalid` (temp) | Full autonomous pipeline E2E: free trial → onboard → claim → enable autonomous → trigger orchestrator API → poll batch completion → verify generated_ideas + week_pack → render pack page in browser. Self-cleaning. `--dry-run` skips orchestrator call. |
 | `e2e-partial-week` | `kenlyle+2@gmail.com` (real) | Partial first-week onboarding: asserts Architect plan and pack item count ≤ days remaining in the current `week_starts_on`-aligned week; self-adjusts expected count by running day |
 | `social-01-fb-publish` | `kenlyle+2@gmail.com` (real) | End-to-end Facebook publish: generate idea, save, select page, publish, verify success badge |
 | `social-02-api-contract` | `kenlyle+2@gmail.com` (real) | Headless `fetch`-only contract tests for social publish endpoints: 401, 405, 422, response shape |
@@ -1015,6 +1016,19 @@ The pattern is consistent: the bugs that survive longest are the ones that fail 
 
 ---
 
+## Standalone image pipeline smoke tests (repo root)
+
+These `.mjs` scripts live at the `postglider-auto` repo root (not in `scripts/`). They make real API calls and cost money — run them when validating a model change or a new pipeline stage, not on every deploy.
+
+| Script | What it tests | Run command |
+|---|---|---|
+| `test-equipment-imagegen.mjs` | Full Trade route Step 1: keyword-matches 3 landscaper captions against `brand_assets.ai_tags`, generates an equipment rider via Gemini Flash, enriches the prompt, calls gpt-image-2 low, saves PNGs to `scripts/output/` | `node test-equipment-imagegen.mjs` |
+| `test-gemini-finisher.mjs` | Step 2 identity composite in isolation: loads an existing scene PNG + a headshot URL, runs the expanded `identityInsert` guardrail (face swap + sign removal + misalignment fix), saves result to `scripts/output/`. Default model is NB 2.5 (`gemini-2.5-flash-image`, $0.067); `--pro` flag switches to NB 3 Pro (`gemini-3-pro-image`, $0.134) | `node test-gemini-finisher.mjs` / `node test-gemini-finisher.mjs --pro` |
+
+Output files land in `scripts/output/` (gitignored). Upload to `user-gallery-images` bucket for a shareable URL if needed.
+
+---
+
 ## Known Gaps
 
 This table is updated whenever a billing, auth, or subscription change ships without corresponding test coverage. It is the authoritative list of what the test suite does **not** verify.
@@ -1031,6 +1045,7 @@ This table is updated whenever a billing, auth, or subscription change ships wit
 | `normalizeIntent` equipment-trade paths | `imagegen-04` | ~~`is_equipment_trade` derivation (DB-cached and regex fallback) and `enrichTradePrompt` injection not tested — the most domain-specific routing logic had no unit coverage~~ | Since equipment-trade classification added | 2026-06-05 (`imagegen-04` — 10 new tests covering all branches) |
 | `personInSceneComposite` Gemini adapter | — | ~~Zero test coverage for the identity composite function; silent API field errors + camelCase/snake_case mismatch went undetected since D016 deployed~~ | Since D016 deployed | 2026-06-05 (`imagegen-07-composite` — 10 HTTP mock tests) |
 | `e2e-generate` sequential isolation | `e2e-generate` | Chaining routes in one process causes stale idea/pack accumulation — test results degrade on 2nd+ route. Must run each route as a separate process. | 2026-06-11 | Documented — no code fix needed; architectural constraint |
+| Autonomous pipeline E2E | — | No test covered the full new-user → autonomous batch → pack-verified journey. | 2026-06-18 | 2026-06-18 (`app-17-autonomous-e2e` — 7 phases: registration, profile verify, enable autonomous, trigger orchestrator, poll batch, verify DB, render pack page) |
 | `e2e-generate` vault assertions | `e2e-generate` | ~~Vault tests waited for "Approve"/"Add to Pack" which never appear after single-photo vault generation (effectiveBatchSize=1 → GEN_COMPLETE → review state)~~ | Since vault route added | 2026-06-11 (`e2e-generate.cjs` — vault assertions rewritten to waitForResponse + button re-enable) |
 | `e2e-generate` VaultPickerModal origin filter | `e2e-generate` | ~~`setupProfile()` keeperIds query included ai_generated images; VaultPickerModal only shows upload/gmb — setup kept invisible images, vault picker showed 0 tiles~~ | Since vault route added | 2026-06-11 (`e2e-generate.cjs` — added `origin=in.(upload,gmb)` to keeperIds query) |
 
