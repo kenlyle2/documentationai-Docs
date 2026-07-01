@@ -53,6 +53,7 @@ node scripts/run-all.cjs social       # only the social-publishing tests
 | `social-02-api-contract` | `kenlyle+2@gmail.com` (real) | Headless `fetch`-only contract tests for social publish endpoints: 401, 405, 422, response shape |
 | `social-03-token-health` | `kenlyle+2@gmail.com` (real) | Supabase-admin audit of OAuth token health: refresh_token presence, expiry windows, schema compatibility |
 | `billing-01-woo-webhook` | none (API-only) | WooCommerce webhook auth + contract: valid/invalid signature, SKU upgrade paths, `billing_events` DB write |
+| `postforme-audit` | none (env: `POSTFORME_API_KEY`) | Lists all PostForMe social accounts with `id`, `platform`, `status`, `external_id`, and `username` — diagnostic utility for verifying account sync state and connection health |
 
 **Self-cleaning:** all three `onboard-*` scripts delete the test user from `auth.users` at the end of every run via the admin API (try/finally, so cleanup runs even on failure). Requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`; skips gracefully if absent.
 
@@ -764,7 +765,7 @@ The functional tests (`app-*`, `onboard-*`, `e2e-*`) prove that the product work
 
 For PostGlider's image generation pipeline specifically, unit tests matter because the routing decisions (which model, which provider, which price tier) are pure logic — they are deterministic calculations over a small set of fields. A functional test can confirm that an image was generated, but it cannot efficiently check all the edge cases: what happens when a landscaping business gets combined with a face-identity request? What if the equipment brand name is already in the prompt? A unit test checks each of these scenarios in milliseconds, with zero API cost.
 
-The seven `imagegen-*` scripts form a **test pyramid** — the base layer (01–06) tests logic, the middle layer (07) tests the boundary between our code and an external API, and the functional tests above verify the full user journey.
+The `imagegen-*` scripts form a **test pyramid** — the base layer (01–05) tests logic, the top layer (07) tests the boundary between our code and an external API, and the functional tests above verify the full user journey.
 
 ---
 
@@ -781,7 +782,6 @@ node scripts/imagegen-02-policy.cjs
 node scripts/imagegen-03-cohort.cjs
 node scripts/imagegen-04-normalize.cjs
 node scripts/imagegen-05-fixtures.cjs
-node scripts/imagegen-06-circuit-breaker.cjs
 node scripts/imagegen-07-composite.cjs
 ```
 
@@ -792,7 +792,6 @@ node scripts/imagegen-07-composite.cjs
 | `imagegen-03-cohort` | Canary rollout gate: cohort assignment, percentage thresholds, and determinism |
 | `imagegen-04-normalize` | `normalizeIntent()` signal-to-intent mapping: identity policy, equipment-trade derivation, brand name injection |
 | `imagegen-05-fixtures` | 15 end-to-end routing scenarios — each confirms the full `normalizeIntent → policyEngine` pipeline produces the expected routing decision |
-| `imagegen-06-circuit-breaker` | `provider_circuit` state machine: closed/open/half-open logic and database round-trips |
 | `imagegen-07-composite` | Google Gemini adapter for identity composites — HTTP mock tests that cover response parsing, error paths, and request shape |
 
 ---
@@ -952,19 +951,6 @@ This script runs 15 scenarios through the complete `normalizeIntent → policyEn
 
 ---
 
-### imagegen-06-circuit-breaker
-
-Tests the `provider_circuit` state machine — the mechanism that temporarily stops sending requests to an AI provider that has been failing, rather than hammering a broken endpoint indefinitely.
-
-The three states:
-- **Closed** — normal operation, requests go through
-- **Open** — provider is failing; all requests are rejected immediately without attempting a real API call (this prevents a slow timeout on every generation attempt while a provider is down)
-- **Half-open** — a trial period after the circuit has been open; one test request is allowed through to see if the provider has recovered
-
-The script tests the state transitions and boundary conditions (e.g., exactly 10 minutes in the open state vs. 9 minutes 59 seconds) using both inlined logic (Layer 1) and live database round-trips (Layer 2) to confirm the state is read and written correctly.
-
----
-
 ### imagegen-07-composite
 
 Tests `personInSceneComposite()` — the function that calls Google Gemini to produce an identity-preserving composite image (person's face from a headshot placed into a scene image). This is the core of the D016 architecture: Google Gemini direct at $0.067/image vs. MuAPI at $0.12.
@@ -1011,6 +997,8 @@ Looking back at the commit history, the three gaps the new tests cover correspon
 | EXPLORE_TRADE route not tested — any priority change would go unnoticed | Code review during audit | Months | `imagegen-02` sync-guard + `imagegen-05` f12/f13 |
 | `normalizeIntent` didn't include `is_equipment_trade` in the returned intent | Code review during audit | Since EXPLORE_TRADE was added | `imagegen-04` equipment-trade tests |
 | `personInSceneComposite` — invalid API fields + case mismatch → silent failure | D017 benchmark forced a real API call | Since D016 deployed | `imagegen-07` mock tests |
+
+**Note:** `imagegen-06-circuit-breaker` was retired 2026-07-01 when MuAPI image generation was removed (D-2026-07-01b). The `provider_circuit` table it tested has been dropped.
 
 The pattern is consistent: the bugs that survive longest are the ones that fail silently — no error message, no crash, just a wrong or missing result. Unit tests with explicit assertions are what surface these.
 
