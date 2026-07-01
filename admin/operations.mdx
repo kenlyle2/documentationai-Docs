@@ -637,6 +637,72 @@ Header: Authorization: Bearer SERVICE_ROLE_KEY
 
 ---
 
+## Onboarding — Cold-Start Path (No Website, No Google Listing)
+
+Some businesses signing up have neither a website nor a Google Business Profile listing —
+common for brand-new trades/local-service businesses. Both onboarding entry points
+(`/free-trial` and `/onboarding`) now handle this without forcing the owner to invent a URL.
+
+### The two entry points
+
+| Entry point | Who uses it | Cold-start UI |
+|---|---|---|
+| `/free-trial` | Anonymous, pre-signup demo flow | "Do you have a website?" → No → "Google Business Listing?" → No → manual business/profile questions |
+| `/onboarding` | Authenticated users completing setup | `BusinessFinder`'s third link, "I don't have a website or a Google listing" |
+
+Both paths converge on the same server-side code — `POST /api/onboarding/run` with a `manual`
+body field instead of `placeId`/`url` — so a cold-start signup gets the identical profile shape
+(GPT-based niche classification, service seeding, content-intelligence generation) as a
+URL-scanned one, just without the enrichment scan step.
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Manual body field** | `app/api/onboarding/run/route.ts` | Accepts `manual: { name, location, industry, service_promoted, target_audience, customer_result, tone, business_differentiation }`. Skips business-enrichment entirely, builds the same internal shape a website scan would have produced, and reuses the existing create/patch-profile code unchanged. Writes `business_profiles.onboarding_source = 'manual'`. |
+| **Third BusinessFinder link** | `components/onboarding/BusinessFinder.tsx` | "I don't have a website or a Google listing" — appears below both the search and URL options (a fallback, not a default) on `/onboarding` for users who never went through `/free-trial`. |
+| **Manual entry steps** | `app/onboarding/page.tsx` (`MANUAL_BUSINESS`/`MANUAL_PROFILE` states) | Reuses the same `StepBusiness`/`StepProfileBuilder` components `/free-trial` already uses. Turnstile is skipped here (`/onboarding` already requires an authenticated session, unlike the anonymous public `/free-trial` entry). |
+| **Skip-forward fix** | `app/onboarding/page.tsx` init effect | If an existing incomplete profile has `website_url` AND `google_maps_url` both null (i.e. it already went through the cold-start path once, typically via `/free-trial`), the pipeline runs immediately via `existingProfileId` alone — the user is never sent back through `BusinessFinder` to answer the same questions twice. |
+
+### Why the skip-forward fix mattered
+
+`/free-trial` already had a full cold-start flow before this work — the actual gap was narrower
+than "no fallback exists." A `/free-trial` user who answered "no website"/"no listing" and
+completed manual entry would get redirected to `/onboarding` on account claim, where the init
+effect used to always show `BusinessFinder` regardless of what the profile already had — asking
+the same two questions a second time. Fixed by checking `website_url`/`google_maps_url` before
+deciding whether to show the finder at all.
+
+### Common admin queries
+
+**Find cold-start signups (no website, no Google listing):**
+```sql
+SELECT id, name, industry, location, onboarding_source, created_at
+FROM business_profiles
+WHERE website_url IS NULL
+  AND google_maps_url IS NULL
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+**Check that classification still ran for a cold-start profile** (GPT-only fallback — no
+Context.dev domain crawl is possible without a `website_url`):
+```sql
+SELECT id, name, classification_codes, niche_prompt_assist IS NOT NULL AS has_niche_assist
+FROM business_profiles
+WHERE id = '<uuid>';
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| User re-asked "no website?" after already answering on `/free-trial` | Profile's `website_url`/`google_maps_url` aren't both null (partial enrichment wrote one of them) — the skip-forward check requires both | Check the row directly; if enrichment partially succeeded, the profile isn't a pure cold-start case and the re-ask is expected |
+| Cold-start profile has no `classification_codes` | GPT classification step failed (rare — check server logs for the `classify` SSE step's error detail) | Re-run `classifyBusinessNiche(profileId)` manually, or have the user revisit `/onboarding` — `existingProfileId`-only calls are idempotent |
+| Cold-start profile has no competitor rows | `competitor-finder` only fires when `classification_codes.length >= 3` — a cold-start profile with thin manual input may not classify to 3+ codes | Check `classification_codes` array length; if under 3, the owner may need to add more service detail via Settings before competitor discovery can run |
+
+---
+
 ## Admin panel tabs
 
 The `/admin` panel is visible to `is_admin = true` accounts only.
