@@ -703,6 +703,58 @@ WHERE id = '<uuid>';
 
 ---
 
+## Onboarding — Idealized Workspace (Generated Background)
+
+`workspace` is a `brand_assets` `asset_type` and one of the top background priorities for most
+Genie content categories (`lib/utils/brandAssetMapping.ts`). A business that never uploads a
+real workspace photo used to silently get worse backgrounds on most posts. Onboarding now offers
+a free, one-time-per-profile AI-generated background so every profile has at least one workspace
+asset by the time it reaches the dashboard.
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Generator** | `lib/imagegen/generateIdealizedWorkspace.ts` | Calls gpt-image-2 (OpenAI direct, same route as the two-step Trade pipeline's Step 1 scene setter) with an empty, industry-specific prompt. Mandates a real floor/ground plane spanning the full frame — this is a direct fix for the identity-composite "no standing surface" failure mode, not just a workspace-specific nicety. |
+| **API route** | `app/api/generate-workspace/route.ts` | `POST { profile_id }`. Gated on zero existing `workspace`-type `brand_assets` rows for the profile — regenerating before Accept is free (nothing committed yet), the gate only blocks once a row exists. Accepts either a real user session or a service-role Bearer token (the latter used by `scripts/e2e-generate.cjs` to generate per-profile test fixtures, bypassing the gate entirely since it isn't spending a real user's quota). |
+| **Onboarding step** | `components/onboarding/StepWorkspace.tsx` | Accept / Regenerate / Skip UI, wired into `app/onboarding/page.tsx`'s `WORKSPACE` step after REVIEW/EQUIPMENT. Accept inserts the `brand_assets` row client-side; Skip inserts nothing. |
+| **Readiness signal** | `components/dashboard/OnboardingReadiness.tsx` | New `workspaceReady` dimension — done when a `workspace`-type `brand_assets` row exists for the profile. |
+
+### Common admin queries
+
+**Find profiles with no workspace asset at all** (candidates that skipped the step or signed up
+before this feature shipped):
+```sql
+SELECT bp.id, bp.name, bp.industry
+FROM business_profiles bp
+WHERE NOT EXISTS (
+  SELECT 1 FROM brand_assets ba
+  WHERE ba.business_profile_id = bp.id AND ba.asset_type = 'workspace'
+)
+ORDER BY bp.created_at DESC
+LIMIT 50;
+```
+
+**Check whether a profile's workspace asset was generated or uploaded** (generated rows are
+stored in the `generated-images` bucket; uploaded ones in `business-images`):
+```sql
+SELECT id, url, label, created_at
+FROM brand_assets
+WHERE business_profile_id = '<uuid>' AND asset_type = 'workspace';
+-- url containing '/generated-images/' → AI-generated via this feature
+-- url containing '/business-images/'  → owner-uploaded
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `/api/generate-workspace` returns 409 | A `workspace`-type `brand_assets` row already exists for the profile — the one-time free gate is working as designed | If the existing asset is bad, delete it via the profile's Brand Assets card, then retry |
+| Generated image looks generic / not industry-specific | `business_profiles.industry` is null or very generic for the profile | The route falls back to `'small business'` when `industry` is unset — backfill the profile's industry field, or have the owner upload their own photo instead |
+| Script-generated fixture image not appearing in `scripts/output/` | `SUPABASE_SERVICE_ROLE_KEY` not set, or `TEST_BASE_URL`/`--dev` pointing at a server that isn't running | Confirm the target Next.js server is up and the service key env var matches the deployed value (see the general `.env.local` byte-for-byte comparison rule in `postglider-auto/CLAUDE.md` §Cloud Run deployment rules item 6) |
+
+---
+
 ## Admin panel tabs
 
 The `/admin` panel is visible to `is_admin = true` accounts only.
