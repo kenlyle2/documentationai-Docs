@@ -51,6 +51,9 @@ When a trial injection fails, our system immediately sends a **transactional ema
 
 This alert arrives within seconds of the failure, not after a customer complaint.
 
+**Template ID:** `cmq7937rs04vz0jwn6t5mikue` (Billing Failure Alert — live and published as of 2026-06-09)  
+**Secret:** `LOOPS_BILLING_ALERT_ID` — stored as a Supabase edge function secret; both `wpsubscription-webhook` and `billing-recon` read it from `Deno.env`. See `documentationai-Docs/admin/loops-so-processes.mdx` for the full workflow inventory.
+
 ### 4. Background Reconciliation
 
 A scheduled edge function (`billing-recon`) scans for any billing events that remain in a failed state for more than 15 minutes. If an alert was somehow missed, it sends a follow-up. Each event is marked `alerted = true` after the first successful email, ensuring no duplicates.

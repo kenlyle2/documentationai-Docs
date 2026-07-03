@@ -113,6 +113,40 @@ Retries up to 2 times on transient network errors (`ERR_CONNECTION_RESET`, `ERR_
 
 **Why this matters:** Before the resilient helper, a single packet-loss spike during `page.goto()` in Costa Rica would fail the entire test suite. Now the suite auto-recovers from transient network hiccups without human intervention.
 
+### `admin-reset-usage.cjs` (postglider-auto repo root — not `scripts/`)
+
+Zeros a user's daily/monthly usage counters via the **real** admin endpoint
+(`PATCH /api/admin/user-search`), driven through the actual `/admin` UI — not a raw database
+write. Built 2026-07-03 after `kenlyle+2@gmail.com` hit its monthly quota mid-session during manual
+feature testing (a scenario the `teardown.cjs`/`cleanupTestUserData` isolation above doesn't cover,
+since that cleans up *generated rows*, not the usage counters themselves).
+
+```bash
+node admin-reset-usage.cjs <target-user-email> [admin-email] [--dev]
+```
+
+**Why not just `UPDATE profiles SET usage_monthly = 0` with the service-role key?** That skips
+`verifyAdmin()`'s `is_admin` check, the endpoint's own field handling, and any audit trail a real
+admin action leaves. This script instead logs in **as a real admin account** (default
+`kenlyle@gmail.com`) via a passwordless Supabase magiclink exchange, then clicks the actual
+**Admin** (sidebar) → **Admin Actions** (tab) → look up email → **Zero both** → **Save & stamp
+reset date to today** buttons — the same clicks a human admin makes.
+
+<Callout kind="warning">
+  Never modify this script to `console.log` the callback URL, the raw session fragment, or
+  `page.url()` right after navigating to it — all three carry a live bearer token for the admin
+  account. An earlier version of this exact script did this for diagnostics and printed a live
+  access token into a Claude Code transcript (2026-07-03). Extract tokens in memory only and pass
+  them straight into `page.goto()`.
+</Callout>
+
+**Fixed 2026-07-03:** the Supabase project's Auth redirect-URL allow-list originally only
+recognized `app.postglider.com` (the retired core app), which is why the script builds its own
+same-domain callback URL from the session fragment instead of trusting Supabase's `redirect_to`.
+`https://autonomous.postglider.com/auth/callback` and `https://autonomous.postglider.com/` have
+since been added to the allow-list, so `redirect_to` works correctly now too — the workaround
+stays in place since it's harmless and more explicit about which URL gets used.
+
 ---
 
 ## Chain Reasoning — Why This Order
