@@ -1174,6 +1174,40 @@ understanding) are written up in `TASKS.md` in `postglider-auto`, not yet built.
 | Orchestrator wiring | `app/api/autonomous/orchestrator/route.ts` (`generateViralityCitation`, alongside `generateTrendingHooks`) |
 | Full origin story | `docs/virality-pipeline-history.md` in `postglider-auto` |
 
+### ViralTrends EXPLAIN-step grounding — `last30days-skill` on Railway (in progress)
+
+ViralTrends (the dedicated sub-agent for the virality-candidate post, `app/api/autonomous/
+viraltrends/route.ts`) has two composed jobs: DETECT (find a real outlier post — the Virality
+Agent above, live) and EXPLAIN (connect that citation to a genuine macro trend, not an invented
+one). EXPLAIN is currently Gemini reasoning from parametric knowledge alone. The plan is to ground
+it in a real, cited research pass via [`mvanhorn/last30days-skill`](https://github.com/mvanhorn/last30days-skill)
+(forked to `kenlyle2/last30days-skill`), a mature multi-source research engine (Reddit, X,
+YouTube, TikTok, HN, Polymarket, Bluesky, web).
+
+<Callout kind="warning">
+  The forked repo already has a FastAPI HTTP wrapper (`api.py`, added 2026-06-16) with the right
+  shape (`/watchlist/add`, `/watchlist/run`, `/health`), but its Railway service had never
+  successfully deployed — 20+ days of "Deploy failed," running a stale batch-script build. Fixed
+  the build 2026-07-08 through four layers (missing `pip`, missing `pip` module, PEP 668
+  externally-managed environment, `pip install -e .` failing on this repo's flat multi-package
+  layout — see `nixpacks.toml`/`railway.json` in the fork for the working config). The build now
+  succeeds cleanly, but the container still shows **zero CPU/memory for its entire runtime on
+  every deploy** — a Railway account/platform-level restriction not diagnosable from the CLI.
+  Check the Railway dashboard for `last30days-skill` for a spending-limit or account warning
+  before assuming the code is still broken.
+</Callout>
+
+**Git hygiene:** the fork's deploy scaffolding (`api.py`, `airtable_writer.py`,
+`naics_topics.json`, `nixpacks.toml`, `railway.json`) is marked `merge=ours` in `.gitattributes`,
+so pulling upstream's ongoing research-engine improvements (`git fetch upstream && git merge
+upstream/main`) never touches it. Requires `git config merge.ours.driver true` once per local
+clone of the fork.
+
+**Not yet built:** once the Railway service is actually running, `lib/autonomous/
+viralityAgent.ts` needs to call it with the citation's resolved topic and thread the result into
+ViralTrends' EXPLAIN instruction. Full history and reasoning: `docs/Building-Agents.md` §
+"Grounding the EXPLAIN step" and `docs/adr/ADR002-30days-agent-x-tiktok.md` in `postglider-auto`.
+
 ---
 
 ## TourGuide Agent — AI-Native Guided Tour
