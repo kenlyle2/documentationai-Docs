@@ -615,6 +615,39 @@ Header: Authorization: Bearer SERVICE_ROLE_KEY
 
 ---
 
+## Media Vault & Brand Assets — Unified Tagging Agent
+
+One shared vision-tagger (`lib/agents/taggingAgent.ts`, `postglider-auto`) now serves both real
+callers instead of each maintaining its own tagging logic. Built 2026-07-07 after an audit found
+Media Vault's own tagger silently running with zero vocabulary awareness on 4 of its 6 real call
+sites, and Brand Assets photo uploads never getting tagged at all despite `ai_tags` already
+existing as a column.
+
+**What it gathers before tagging any image** (`getSharedVocabulary(userId)`) — deduped into one
+prompt block so a new tag doesn't reinvent a term that already exists elsewhere:
+- `glossary_terms` — this business's onboarding-curated preferred vocabulary
+- `business_profiles.niche_prompt_assist.merged_content_angles` — onboarding niche angles
+- `brand_assets.label` / `ai_tags` already set for the profile
+- this user's own recent `user_images.tags` — keeps Media Vault internally consistent over time
+
+**Model path:** Google Gemini 2.5 Flash primary (`callGemini()`, `lib/gemini.ts`), OpenAI
+GPT-4o-mini fallback if `GEMINI_API_KEY` is unset or the Gemini call fails — same
+vocabulary-aware prompt either way.
+
+**Callers:**
+| Caller | Entry point | Notes |
+|---|---|---|
+| Media Vault | `tagImageAction()`, `lib/actions/galleryActions.ts` | Server action, resolves `userId` via session if not passed explicitly |
+| Brand Assets | `POST /api/tag-brand-asset` | Thin route (session-auth'd) — `BrandAssetsCard.tsx` is a client component and fires this fire-and-forget right after a successful upload |
+
+<Callout kind="info">
+Existing `brand_assets` rows uploaded *before* 2026-07-07 still have `ai_tags: []` — this fix
+only covers the live upload path going forward. A one-time backfill batch job (iterate rows
+where `url IS NOT NULL AND ai_tags = '{}'`, call the agent per row) has not been written yet.
+</Callout>
+
+---
+
 ## Client Onboarding Checklist
 
 <Steps>
