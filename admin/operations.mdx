@@ -648,6 +648,71 @@ where `url IS NOT NULL AND ai_tags = '{}'`, call the agent per row) has not been
 
 ---
 
+## Website Vault Sync — Reference-Only Website Image Import (PoC, 2026-07-10)
+
+A proof of concept for pulling a client's own real photography (portfolio, gallery, work
+samples) into the Media Vault directly from their live website — closing the gap where a
+business's Vault held only AI-generated and manually-uploaded images, never anything from the
+site they already run. Built and live-verified for one real client (Stay True Tattoo); **not
+yet wired into onboarding or a recurring cron** — see `TASKS.md` for the productization work.
+
+### What it does
+
+1. Fetches the client's `wp-sitemap.xml`, discovers real content pages (no assumption of a
+   single "gallery" page — for Stay True Tattoo, portfolio photos were embedded across 5
+   separate artist bio pages)
+2. Extracts and dedupes `<img>` URLs, filtering icons/logos/tracking pixels
+3. Quality-scores every candidate with the same `scoreImageQualityWithGemini()` the rest of the
+   app uses (`lib/gemini.ts`) — no separate/duplicate scoring logic
+4. Tags passing candidates with the same `tagImage()` agent (`lib/agents/taggingAgent.ts`) —
+   this is how a specific image (e.g. a client's "blue dragon" tattoo) gets identified out of a
+   page full of opaque camera-ID filenames
+5. Imports a selection into `user_images` as **reference-only rows** — `origin: 'website'`,
+   `public_url` pointing at the *original* website URL, `size_bytes: 0`, no Supabase Storage
+   copy. Same pattern GMB Scout already uses (`origin: 'gmb'` — see [GMB Scout &
+   Story Enrichment](/admin/gmb-scout)) — Vault storage cost stays flat regardless of how many
+   external images get indexed
+6. Syncs each imported image to the client's WordPress subsite via the existing
+   `POST /wp-json/postglider/v1/sync-image` endpoint — the same call `tagImageAction()` already
+   makes after every tag — so the image appears in the client's SearchIQ-powered gallery in the
+   same pass that makes it usable in PostGlider (Vault picker, generation reference, etc.)
+
+### Reference-only vs. Storage-copied
+
+No bytes are copied into Supabase Storage by default — `user_images.public_url` points straight
+at the client's own CDN/host. This keeps Vault storage cost flat no matter how many external
+images get indexed. Trade-off: a reference row has no protection if the source URL later moves
+or 404s (a gap `gmb-scout`'s `origin: 'gmb'` rows already have today too — not new to this PoC).
+A client-initiated "pin to Storage" opt-in (copy the bytes before a site migration, etc.) is
+part of the not-yet-built productization.
+
+### Running the PoC script manually
+
+```bash
+cd postglider-auto
+npx tsx scripts/stay-true-vault-import.mts
+```
+
+Currently hardcoded to the Stay True Tattoo profile and its 5 known artist pages — generalizing
+this to take a `business_profile_id` and discover a client's own image pages automatically is
+the first item of the productization work below.
+
+### Not yet built — planned as an admin cron/monitoring job (see `pg-admin`)
+
+This capability is planned to live in **`pg-admin`**, not `postglider-auto` — like GMB Scout's
+health-check counterparts, it's operational tooling that watches something (a client's website)
+on a cadence, not customer-facing product code:
+
+- **Capture**: a recurring per-client sitemap re-crawl, diffing discovered image URLs against
+  `user_images.public_url` for that profile, importing only new ones
+- **Usable in PostGlider**: automatic, since the import step writes directly to `user_images`
+- **Featured on SearchIQ**: automatic, since `sync-image` fires in the same pass
+
+See `pg-admin/TASKS.md` for the tracked follow-up and `research/decisions.md` D-2026-07-10a for
+the full PoC write-up.
+
+---
+
 ## Client Onboarding Checklist
 
 <Steps>
