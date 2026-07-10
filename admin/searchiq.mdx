@@ -157,8 +157,8 @@ Auto-provisioning (`configure-site`) creates the Gallery page with `[pg_gallery]
   </Step>
 </Steps>
 
-<Callout kind="warning">
-**Confirmed 2026-07-10 (`decisions.md` D-2026-07-10e): none of the above is automated by onboarding today.** `postglider-auto`'s `callWpConfigureSite()` never sends a `searchiq_api_key`, so `pg_configure_searchiq()` never runs during real client provisioning — every new subsite gets `[pg_gallery]` only, no SearchIQ. Stay True Tattoo's setup (and the Image Custom Field step specifically) happened manually, outside this path, and a stale/never-resynced index caused a real broken-thumbnail incident for it. Wiring `searchiq_api_key` through onboarding and seeding `_siq_image_custom_field` automatically is tracked in `pg-media-vault/TASKS.md` and `postglider-auto/TASKS.md` — until that ships, every new client needs this full per-client setup done by hand.
+<Callout kind="info">
+**Automated as of 2026-07-10 (`decisions.md` D-2026-07-10e/g) — the manual steps above are now historical/fallback reference, not the normal path.** `provisionWpSubsite()` calls a new `POST /wp-json/postglider/v1/searchiq-install` endpoint (`pg-media-vault` v0.4.5+) right after `configure-site`, which performs every step above — including the Image Custom Field fix — in one call, with no wp-admin visit. See [Operations → SearchIQ Auto-Install](/admin/operations#searchiq-auto-install-every-new-client-now-gets-a-working-faceted-gallery-automatically) for the full mechanics, the manual re-run command (for a subsite provisioned before this shipped, or with `SEARCHIQ_API_KEY` unset at the time), and a real Cloudflare-502-masking bug found fixing this worth knowing about if you ever touch this endpoint.
 </Callout>
 
 ---

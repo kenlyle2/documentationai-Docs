@@ -713,6 +713,80 @@ the full PoC write-up.
 
 ---
 
+## SearchIQ Auto-Install — Every New Client Now Gets a Working Faceted Gallery Automatically
+
+Shipped 2026-07-10 (`decisions.md` D-2026-07-10e/g). Closes a gap that existed since SearchIQ was
+first integrated: **onboarding never actually configured SearchIQ for a new client.** Every new
+subsite got the bare `[pg_gallery]` shortcode (no facets, no autocomplete, client-side filtering
+only) until someone did the full manual setup in `SearchIQ → Settings` by hand — see
+[SearchIQ & Media Vault Search](/admin/searchiq) for what that manual process used to require.
+That manual process is exactly what's now automated.
+
+### What happens automatically now
+
+`provisionWpSubsite()` (`postglider-auto`, `lib/actions/wpActions.ts`) calls a new endpoint on
+the subsite itself right after `configure-site`:
+
+```
+POST https://{slug}.mypostglider.website/wp-json/postglider/v1/searchiq-install
+Header: X-Gallery-Token: <same token sync-image uses>
+Body:   { "searchiq_api_key": "<SEARCHIQ_API_KEY env var>" }
+```
+
+In one call, this endpoint (`pg-media-vault` v0.4.5+, `includes/searchiq-install.php`):
+
+1. Stores the SearchIQ API key
+2. Sets `_siq_postTypesForSearchSelection` — **the option that actually matters.**
+   `pg_configure_searchiq()`'s older `_siq_raw_settings` seed turned out to be a write-only
+   pre-fill for the SearchIQ admin UI, not something the plugin's own indexing logic reads.
+3. Sets `_siq_image_custom_field` to `pg_gallery_image:_pg_image_url` — the fix for the
+   broken-thumbnail bug (see [SearchIQ & Media Vault Search](/admin/searchiq)'s existing
+   Callout on this)
+4. Registers a brand-new SearchIQ engine (`submit_engine()`) — idempotent, skipped if one
+   already exists for this subsite
+5. Pushes the settings above to that engine (`_siq_sync_settings()`)
+6. Swaps the Gallery page shortcode from `[pg_gallery]` to `[searchiq]`
+
+No wp-admin visit, no manual per-client setup. `SEARCHIQ_API_KEY` lives in `postglider-auto`'s
+`.env.local` — a single key shared across the merged AppSumo lifetime accounts; SearchIQ assigns
+each subsite its own distinct `engineKey` automatically on registration.
+
+<Callout kind="info">
+If a subsite somehow already has SearchIQ configured with no key set (`SEARCHIQ_API_KEY` unset at
+provisioning time, or provisioned before this shipped), re-run the install manually:
+
+```bash
+curl -X POST "https://{slug}.mypostglider.website/wp-json/postglider/v1/searchiq-install" \
+  -H "Content-Type: application/json" \
+  -H "X-Gallery-Token: <gallery_tokens.token for this profile>" \
+  -d '{"searchiq_api_key": "<the real key>"}'
+```
+
+Safe to re-run — every step is idempotent.
+</Callout>
+
+<Callout kind="warning">
+**If this endpoint ever returns what looks like a raw Cloudflare "502 Bad Gateway" HTML page
+instead of JSON, that is not a server crash.** Cloudflare intercepts any `502`/`504` status code
+from the origin and replaces the response body with its own branded error page — this endpoint
+hit that exact trap once during development (a legitimate application-level error was returned
+with status `502`, and Cloudflare silently ate the real message). All error responses from this
+endpoint now use `4xx`/`500`, which Cloudflare passes through unmodified. If you ever add a new
+error path here or in a similar subsite-facing endpoint, avoid `502`/`504` for anything that
+isn't an actual gateway failure.
+</Callout>
+
+### Not yet done — Phase 2
+
+Ken's stated architecture: admin/operational processes like this should live in `pg-admin`
+(alongside its cron jobs), with `postglider-auto` calling `pg-admin` rather than calling
+WordPress directly. That move is deferred until `pg-admin`'s first Cloud Run infra (being built
+in a separate, concurrent effort — see `pg-admin/CLAUDE.md` Tenants) lands, so this doesn't ship
+a second, inconsistent Cloud Run pattern. The WordPress-side endpoint doesn't change for that
+move — only *who calls it* does. See `pg-admin/TASKS.md`.
+
+---
+
 ## Client Onboarding Checklist
 
 <Steps>
