@@ -203,6 +203,11 @@
                 "icon": "calendar-check"
               },
               {
+                "title": "pg-admin Setup & Cutover Checklist",
+                "path": "admin/pg-admin-cutover",
+                "icon": "clipboard-check"
+              },
+              {
                 "title": "Model Discovery & Benchmarking",
                 "path": "admin/model-discovery",
                 "icon": "cpu"

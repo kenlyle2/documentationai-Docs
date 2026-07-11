@@ -1,0 +1,177 @@
+---
+title: "pg-admin Setup & Cutover Checklist"
+description: "Plain-language checklist of every automated job living in pg-admin and pg-media-vault, whether it runs itself or needs a human, and exactly what that human step is."
+visibility: internal
+verified_against_commit: cba0315
+---
+
+## Why this page exists
+
+`pg-admin` is a new, separate repo that holds "watch the business" jobs — things that run on a
+schedule instead of when a customer clicks a button. Some of those jobs are already running by
+themselves. Some are built but sitting there waiting for one human action before they can run.
+This page is a plain checklist: for each job, does it run itself, how often, and — if it needs a
+person — exactly what that person has to click or type. Nothing technical is assumed.
+
+<Callout kind="info">
+If a row below says **"Nothing — it already runs itself,"** you can skip it. This page exists so
+the few rows that *do* need a human don't get lost.
+</Callout>
+
+## The short version
+
+| Job | Runs itself? | How often | Does a human need to do anything right now? |
+|---|---|---|---|
+| GMB owner-photo sync | ✅ Yes, since 2026-07-10 | Every day, automatically | Only a small one-time step (see below) — and it's not blocking anything |
+| SearchIQ install for **new** clients | ✅ Yes, since 2026-07-10 | Every time a new client signs up | No |
+| SearchIQ install — **moving it to pg-admin** (Phase 2) | ❌ Not yet | One-time move | **Yes — 5 steps, see below** |
+| Website Vault Sync (pull photos from a client's own website) | ❌ Not yet — today it only ran once, by hand, for one test client | Not scheduled at all | No action needed *yet* — just don't expect it to be running |
+
+---
+
+## 1. GMB owner-photo sync — already fully automatic
+
+**What it does, in plain words:** Every day, a robot checks every active client's Google
+Business Profile for new photos the *business owner* has posted (not customer photos). If it
+finds good ones, it automatically puts the best one in line to be used in that client's next
+batch of posts — no one has to click anything.
+
+| Question | Answer |
+|---|---|
+| **Does it run by itself?** | Yes. It has been running on its own since **2026-07-10**. |
+| **How often?** | Once a day, every day, at 8:00 AM UTC. This is a real, permanently-scheduled job (Google Cloud Scheduler), not something someone has to remember to run. |
+| **Is there a separate "first run" a human has to trigger?** | No. There's nothing to seed or backfill. Every day, the job automatically looks at *every* eligible client (any client with automatic posting turned on and a Google Maps link saved) and checks each one, skipping any client it already checked in the last 7 days so it doesn't waste money re-checking the same business every day. A brand-new client just gets picked up on the very next daily run — nobody has to add them to a list. |
+| **What does a human have to do today?** | Nothing required. There is exactly **one small loose end**, and it does not stop the job from working: |
+
+<Callout kind="warning">
+**One-time step still owed (not urgent):** Right now, if a developer changes the code for this
+job, someone has to manually rebuild and redeploy it by typing two commands
+(`gcloud builds submit` then `gcloud run jobs update`). Normally, pushing code to GitHub would
+rebuild and redeploy it automatically — but that auto-connection between this repo and Google
+Cloud Build was never turned on. Turning it on requires clicking through a one-time "connect my
+GitHub account" screen inside the Google Cloud Console — this is an interactive login step, so
+only Ken can do it (an AI assistant cannot click through a login screen). **The daily photo-sync
+job itself is unaffected either way** — it keeps running every day whether or not this is done.
+This only matters the next time someone needs to change the job's code.
+</Callout>
+
+---
+
+## 2. SearchIQ install for new clients — already fully automatic
+
+**What it does, in plain words:** When a brand-new client signs up, their website's photo
+gallery needs to be turned on and configured so visitors can search and filter photos
+(this is the "SearchIQ" feature). This used to require someone to manually log into WordPress
+and click through several settings screens for every single new client. It doesn't anymore.
+
+| Question | Answer |
+|---|---|
+| **Does it run by itself?** | Yes, since **2026-07-10**. |
+| **How often / when?** | Automatically, one time, the moment a new client's website is set up — it's part of the normal signup flow, not a schedule. |
+| **What does a human have to do for each new client?** | Nothing. |
+
+<Callout kind="tip">
+If you ever run into an **older** client whose gallery search doesn't work (one who signed up
+*before* 2026-07-10, or signed up while the automatic key was temporarily missing), there is a
+one-time manual fix — a single command you paste into a terminal. See "SearchIQ Auto-Install" in
+[Common Admin Operations](/admin/operations#searchiq-auto-install-every-new-client-now-gets-a-working-faceted-gallery-automatically)
+for the exact command. You only need this for a handful of old accounts, not new ones.
+</Callout>
+
+---
+
+## 3. Moving the SearchIQ install step into pg-admin (Phase 2) — NOT done, needs a human
+
+**What this is:** Right now, the "turn on SearchIQ for a new client" step (described in section 2
+above) is called directly by the main app. The plan is to move *who makes that call* into
+`pg-admin` instead — so all the "robot" processes live in one place. **The feature keeps working
+exactly the same for clients either way** — this is purely a behind-the-scenes reorganization,
+not a new capability.
+
+| Question | Answer |
+|---|---|
+| **Does it run by itself today?** | No — the code for the new version is written, but the new piece of infrastructure it needs to live on has never actually been turned on. |
+| **How often will it run, once set up?** | Same as today — once per new client, automatically, no schedule needed. |
+| **Is anything broken right now?** | No. New clients are still getting SearchIQ turned on correctly via the *old* path (section 2). This move is a cleanup task, not a bug fix. |
+
+<Callout kind="danger">
+**5 things a human (or an AI assistant working *with* Ken's direct approval, since some of these
+touch live secrets and real cloud infrastructure) needs to do, in this order, before switching
+over:**
+</Callout>
+
+<Steps>
+  <Step title="Turn on the new service" icon="server">
+    This code has never actually been deployed to Google Cloud before — it needs its first-ever
+    `gcloud run deploy` command run. Nothing exists yet at this URL; this step creates it.
+  </Step>
+  <Step title="Create a shared password (token)" icon="key">
+    Generate a brand-new secret code and save the *exact same* value in two places (`pg-admin`
+    and the main app) — this is how the two systems will prove to each other they're allowed to
+    talk. If the two don't match exactly, calls will fail with an authorization error.
+  </Step>
+  <Step title="Move the SearchIQ API key" icon="move">
+    Right now, the real SearchIQ key lives in the main app's settings. It needs to be removed
+    from there and added to `pg-admin`'s settings instead — the main app won't need it anymore
+    once this move is done.
+  </Step>
+  <Step title="Point the main app at the new service" icon="link">
+    Update one setting in the main app (`PG_ADMIN_URL`) so it knows the new service's address.
+  </Step>
+  <Step title="Test it on one real (but harmless) client" icon="check-circle">
+    Sign up one throwaway test business start to finish and confirm every link in the chain
+    still works: the new service gets called → it talks to the client's WordPress site →
+    SearchIQ turns on → the searchable gallery actually appears on the page. Don't mark this
+    done until you've watched it work with your own eyes on a real signup, not just a code
+    review.
+  </Step>
+</Steps>
+
+Full technical detail for whoever executes these steps: `pg-admin/TASKS.md` and
+`postglider-auto/TASKS.md` both have a matching checklist entry for this cutover.
+
+---
+
+## 4. Website Vault Sync (pulling photos from a client's own website) — NOT built yet
+
+**What this would do, in plain words:** Some clients already have real photos of their own work
+sitting on their existing website (a tattoo artist's own portfolio page, for example). This
+feature would have a robot periodically re-visit each client's website, notice any new photos
+that aren't already in PostGlider, and pull copies of the *links* to those photos (not the actual
+image files) into that client's Media Vault automatically — so the AI has real photos to draw
+from without anyone uploading anything by hand.
+
+| Question | Answer |
+|---|---|
+| **Does it run by itself?** | No. It has only ever been run **once, manually, for one single test client** (Stay True Tattoo) to prove the idea works. |
+| **How often does it run?** | Never, on a schedule. There is no cron job, no scheduler, nothing automated for this yet. |
+| **Does a human need to do anything right now?** | No — but don't assume this is happening for any client. It isn't, for anyone, today. |
+| **What's the "one-time vs. ongoing" split, once it IS built?** | The very first sync for a client (finding all their existing photos) would be a big one-time catch-up. After that, a repeating job would check periodically for anything *new* the client has added to their site since the last check — that ongoing check is what still needs to be designed and built. Nothing about this is scheduled today. |
+
+<Callout kind="info">
+This is intentionally left unscheduled and unfinished for now — it's flagged as future work in
+`pg-admin/TASKS.md`, not a bug or a missed deadline. If a client seems to be missing photos that
+exist on their live website, that's expected — this feature isn't live for anyone yet, so it
+won't happen automatically until it's built.
+</Callout>
+
+---
+
+## One-page summary — what actually needs a human right now
+
+Everything above boils down to two real to-dos. Everything else already runs on its own.
+
+<Steps>
+  <Step title="Low priority: connect GitHub to Cloud Build for pg-admin" icon="github">
+    One-time click-through login in the Google Cloud Console. Only Ken can do this (interactive
+    login). Doesn't block anything running today — only matters the next time this job's code
+    changes.
+  </Step>
+  <Step title="Medium priority: finish the SearchIQ Phase 2 move" icon="rocket">
+    The 5-step checklist in section 3 above — deploy the new service, create the shared
+    password, move the real API key, point the main app at the new address, then test on one
+    real signup before trusting it.
+  </Step>
+</Steps>
+
+Nothing else on this page needs anyone to do anything today.
