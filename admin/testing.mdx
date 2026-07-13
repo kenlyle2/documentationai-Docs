@@ -147,6 +147,26 @@ same-domain callback URL from the session fragment instead of trusting Supabase'
 since been added to the allow-list, so `redirect_to` works correctly now too — the workaround
 stays in place since it's harmless and more explicit about which URL gets used.
 
+### `regenerate-pack-rationale.mjs` (`pg-projects/scripts/autonomous/` — shared, not postglider-auto's own)
+
+Rebuilds and re-saves an already-created pack's stored "Why this batch" rationale using the
+current `buildBatchRationale()` logic, without re-running a full (paid, content-generating,
+auto-publishing) autonomous batch. Built 2026-07-13 after Ken caught two problems in a real
+rationale: a QUOTA count that silently excluded additive dedicated posts, and a schedule
+explanation truncated mid-word. Fixing the generation logic alone doesn't help an *existing* pack
+— the pack page only ever reads whatever rationale was stored at generation time — so this script
+is the repeatable way to apply a rationale-generation fix retroactively.
+
+```bash
+node scripts/autonomous/regenerate-pack-rationale.mjs <packId> [--dev]
+```
+
+Hits `POST /api/autonomous/regenerate-rationale` in `postglider-auto` (Bearer `CRON_SECRET`).
+Ground-truth data (schedule, post content, dedication sources) is read fresh from
+`week_pack_items`/`generated_ideas`; quota counts and trending hooks are parsed back out of the
+pack's *prior* stored rationale, since those describe a decision made at generation time and
+aren't persisted anywhere else; testimonials and the schedule reasoning are re-fetched live.
+
 ---
 
 ## Chain Reasoning — Why This Order
