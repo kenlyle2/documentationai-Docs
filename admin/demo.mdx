@@ -89,7 +89,7 @@ The client receives a Supabase invite email → clicks link → sets password �
 
 ## Adding a new sales user
 
-1. Have them sign up at `app.postglider.com` normally.
+1. Have them sign up at `autonomous.postglider.com` normally.
 2. Look up their `user_id` in the `profiles` table.
 3. Run: `UPDATE profiles SET is_sales = true WHERE user_id = '<uuid>';`
 

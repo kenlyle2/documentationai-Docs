@@ -43,9 +43,18 @@ Each `context.run()` step is idempotent — QStash replays failed steps automati
 | `QSTASH_CURRENT_SIGNING_KEY` | Vercel (production) | Signature verification on `/api/workflows/*` |
 | `QSTASH_NEXT_SIGNING_KEY` | Vercel (production) | Key rotation safety |
 | `QSTASH_URL` | Vercel (production) | SDK internal use |
-| `WORKFLOW_BASE_URL` | Vercel (production) + Supabase edge function secrets | Target URL for QStash publish (`https://app.postglider.com`) |
+| `WORKFLOW_BASE_URL` | Cloud Run (`postglider-autonomous`) + Supabase edge function secrets | Target URL for QStash publish (`https://autonomous.postglider.com`) |
 
-All 5 Vercel vars and 2 Supabase secrets are set as of 2026-06-10. Source keys from Upstash console → QStash → API/Signing Keys.
+<Callout kind="info">
+  This table said "Vercel (production)" for all 5 vars as of 2026-06-10 — stale since the
+  Cloud Run migration; `postglider-auto` deploys via Cloud Build → Cloud Run, never Vercel. Live
+  `WORKFLOW_BASE_URL` on Cloud Run is correctly `https://autonomous.postglider.com` (verified
+  2026-07-14) — only this doc and the local `.env.local` reference were stale, not the deployed
+  config. If you're setting these vars fresh, set them via `gcloud run services update` /
+  Cloud Run env vars, not a Vercel dashboard.
+</Callout>
+
+Source keys from Upstash console → QStash → API/Signing Keys.
 
 ---
 

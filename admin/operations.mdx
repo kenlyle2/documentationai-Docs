@@ -153,6 +153,21 @@ WHERE user_id = '<uuid>';
 
 Test accounts (`kenlyle+2@gmail.com`) are not WooCommerce subscribers and never receive renewal webhooks. Reset manually with the query above using UUID `96afe716-532e-4538-8422-abbaf90a5d88`.
 
+### Cross-domain session bridge (SupaWP) — why postglider.com billing "just works"
+
+A PostGlider user only ever authenticates through the Next.js app (Supabase) — never through WordPress directly. The `supawp-pg` plugin on `postglider.com` bridges that identity in both directions so billing self-service *and* the `/onboarding?mode=trial` account-claim flow work without a second login screen. Full endpoint reference and handler logic: [Billing Bridge (supawp-pg)](/admin/billing-bridge).
+
+**The one setting that controls both directions:** `supawp_options.supawp_app_callback_url` (WP Admin → Settings → SupaWP → "App Callback URL"). It must match the live app domain exactly. If it's stale, the failure mode is silent — the affected redirect lands on `postglider.com`'s homepage instead of erroring, with nothing in the app's own logs to point at a WordPress-side config.
+
+<Callout kind="warning">
+  Confirmed live 2026-07-14 (D-2026-07-14l): this option still held the retired `https://app.postglider.com/auth/callback` after the domain split — silently stranding every trial-signup account claim on `postglider.com`'s homepage instead of bouncing back to `autonomous.postglider.com`. Fixed via WP-CLI. This was the **second** occurrence of "a config surface still points at the retired `app.postglider.com`" after the 2026-07-03 Supabase Auth redirect-allowlist incident — those are two entirely separate systems (Supabase project settings vs. this WordPress plugin option), so fixing one does not fix the other. If any cross-domain redirect starts landing on the wrong site, check this option first.
+</Callout>
+
+**Checking/fixing the live value:** requires SSH + WP-CLI access to the `postglider.com` hosting
+account (Hostinger). Connection details and the exact `wp option` commands are in
+`research/decisions.md` D-2026-07-14l — not reproduced here since this doc is broader-audience
+than that operational log.
+
 ---
 
 ## Generated Ideas — Stage Lifecycle
@@ -463,7 +478,7 @@ ORDER BY gi.video_submitted_at ASC;
 **Recover a stuck job manually** (hit the polling endpoint — it will call MuAPI and update DB if complete):
 ```bash
 curl -H "Authorization: Bearer <user_access_token>" \
-  https://app.postglider.com/api/video/status/<idea_id>
+  https://autonomous.postglider.com/api/video/status/<idea_id>
 ```
 
 **Mark a stuck job as failed** (frees the user to retry):
@@ -1387,9 +1402,13 @@ TourGuide does the interface legwork to show them.
 ### Cross-origin setup
 
 `postglider-auto` is itself the deployed app at `autonomous.postglider.com`, so same-origin calls
-need no special config. If `app.postglider.com` (core) ever embeds `GuideInput` against this
-Cloud Run backend, set `NEXT_PUBLIC_AUTONOMOUS_URL` on that deployment — the route's
-`ALLOWED_ORIGINS` list already permits `https://app.postglider.com` plus localhost.
+need no special config. The route's `ALLOWED_ORIGINS` list (`app/api/autonomous/guide/route.ts`)
+currently permits only `https://autonomous.postglider.com` plus localhost — it does **not**
+include `app.postglider.com` (retired core app; corrected here 2026-07-14, this doc previously
+claimed otherwise). After the planned domain flip (`ARCHITECTURE.md` §1.0 — `app.postglider.com`
+reassigned from Vercel to this Cloud Run service), `ALLOWED_ORIGINS` and `NEXT_PUBLIC_AUTONOMOUS_URL`
+should be updated together so the two stay in sync; don't add `app.postglider.com` to this list
+before that flip actually happens.
 
 ### Selector coverage
 

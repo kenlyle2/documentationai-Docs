@@ -149,7 +149,7 @@ For multi-language examples:
 ````md
 <CodeGroup>
 ```bash title="cURL"
-curl -X POST https://app.postglider.com/api/admin/tag-backlog \
+curl -X POST https://autonomous.postglider.com/api/admin/tag-backlog \
   -H "Authorization: Bearer SERVICE_ROLE_KEY" \
   -d '{"userId": "<uuid>", "batchSize": 50}'
 ```

@@ -168,7 +168,7 @@ Auto-provisioning (`configure-site`) creates the Gallery page with `[pg_gallery]
 ### Via tag-backlog (re-tags + syncs)
 
 ```bash
-curl -X POST https://app.postglider.com/api/admin/tag-backlog \
+curl -X POST https://autonomous.postglider.com/api/admin/tag-backlog \
   -H "Authorization: Bearer SERVICE_ROLE_KEY" \
   -H "Content-Type: application/json" \
   -d '{"userId": "<uuid>", "batchSize": 50}'

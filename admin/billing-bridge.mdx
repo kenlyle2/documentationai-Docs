@@ -1,54 +1,63 @@
 ---
 title: "Billing Bridge (supawp-pg)"
-description: "How PostGlider users reach their billing account page without a separate WordPress login screen."
+description: "How PostGlider users reach their billing account page — and how the app itself bounces a new signup back — without a separate WordPress login screen."
 visibility: internal
-verified_against_commit: cba0315
+verified_against_commit: 375406f
 ---
 
 ## The Problem
 
-PostGlider users authenticate via the app — they have no WordPress session and cannot access `/my-account` on postglider.com directly. The billing bridge solves this transparently.
+PostGlider users authenticate via the app — they have no WordPress session and cannot access `/my-account` on postglider.com directly. The same `GET /wp-json/supawp/v1/auth/session` endpoint solves this in **two directions**, distinguished only by where `return_to` points:
+
+- **Billing self-service** — `return_to` stays on `postglider.com/my-account`.
+- **Trial account claim** (`/onboarding?mode=trial`) — `return_to` bounces back to `autonomous.postglider.com`, so a newly-claimed trial user's browser round-trips through a real WordPress session and lands back in the app.
 
 ## The Flow
 
 ```
-app.postglider.com/billing
-  → user clicks "Manage Subscription"
+autonomous.postglider.com/billing  (or /onboarding?mode=trial after account claim)
+  → user clicks "Manage Subscription" (or claims their trial account)
   → GET postglider.com/wp-json/supawp/v1/auth/session
         ?token=<supabase-access-token>
-        &return_to=https://postglider.com/my-account
-  → endpoint validates JWT, finds WP user by email,
+        &return_to=<https://postglider.com/my-account | https://autonomous.postglider.com/...>
+  → endpoint validates the return_to host against a trusted list,
+    validates the JWT, finds-or-creates the matching WP user,
     calls wp_set_auth_cookie(), redirects to return_to
-  → user lands on /my-account fully authenticated
+  → user lands on return_to fully authenticated (on WP or back in the app)
 ```
 
-From the user's perspective: one button click, then they're on their account page. No WordPress login screen ever appears.
+From the user's perspective: one button click (or one account-claim form submit), then they're where they should be. No WordPress login screen ever appears.
 
 ## Endpoint Reference
 
-**`GET /wp-json/supawp/v1/auth/session`**
+**`GET /wp-json/supawp/v1/auth/session`** — `handle_session_redirect()` in `class.api-user.php`.
 
 <ParamField query="token" type="string" required>
   Access token (JWT) from the user's active session.
 </ParamField>
 
 <ParamField query="return_to" type="string" required>
-  URL to redirect after the WP cookie is set. Must be on `postglider.com`.
+  URL to redirect after the WP cookie is set. Host must be in the trusted-hosts list (see below) or it silently falls back to `postglider.com`'s homepage — no error is shown.
 </ParamField>
 
 **Handler logic:**
 
 <Steps>
-  <Step title="Validate the JWT" icon="shield">
-    Calls the auth service's user endpoint with `Authorization: Bearer <token>` and the stored `anon_key`.
-  </Step>
-  <Step title="Extract email and find the WP user" icon="user">
-    Extracts `email` from the JWT response. Calls `get_user_by('email', $email)` to find the matching WP account.
+  <Step title="Validate return_to against the trusted-hosts list" icon="shield-check">
+    Trusted hosts = `postglider.com` (this site) + the host parsed from the `supawp_app_callback_url` option, plus anything added via the `supawp_trusted_origins` filter (nothing currently registers that filter anywhere in the workspace).
 
-    If no WP user is found, redirects to `/my-account` unauthenticated — the billing system handles the login prompt.
+    <Callout kind="warning">
+      **This is the single point of failure for both directions of this bridge.** If `supawp_app_callback_url` doesn't match the live app domain, any `return_to` targeting that domain fails this check and silently redirects to `postglider.com`'s homepage instead — not an error page, just a confusing dead end. Confirmed live 2026-07-14 (D-2026-07-14l): this option still held the retired `https://app.postglider.com/auth/callback` after the domain split, stranding every trial-signup account claim. See "Plugin Settings" below for the current value and how to check/fix it.
+    </Callout>
+  </Step>
+  <Step title="Validate the JWT" icon="shield">
+    Decodes the token locally (peeks the header to determine `alg`, verifies via cached JWKS for RS256) — no remote call to the auth service per request.
+  </Step>
+  <Step title="Find or create the WP user" icon="user">
+    Extracts `sub` (Supabase UID) and `email` from the decoded JWT. Calls `get_or_create_user($supabase_uid, $email, null)` — if no matching WP account exists yet, one is created here, not just looked up.
   </Step>
   <Step title="Set the WP auth cookie and redirect" icon="cookie">
-    Calls `wp_set_auth_cookie($user->ID, true)` then `wp_redirect(esc_url_raw($return_to))`.
+    Calls `wp_set_current_user()` + `wp_set_auth_cookie($user->ID, true, is_ssl())`, sets a short-lived transient (`supawp_cross_domain_{user_id}`, default 8h) so the WP-side Supabase client's own `SIGNED_OUT` state doesn't immediately undo the cookie, then `wp_redirect(esc_url_raw($return_to))`.
   </Step>
 </Steps>
 
@@ -74,7 +83,7 @@ From the user's perspective: one button click, then they're on their account pag
 | `supawp_supabase_url` | PostGlider auth service URL |
 | `supawp_service_role_key` | Used by `launch_app` to generate magic links |
 | `supawp_jwt_secret` | HS256 JWT validation (not required — plugin uses ES256/JWKS automatically) |
-| `supawp_app_callback_url` | `https://app.postglider.com/auth/callback` |
+| `supawp_app_callback_url` | **Must match the live app domain** — currently `https://autonomous.postglider.com/auth/callback`. Only its host is used (trusted-hosts check above); the launch-app redirect target also reads this value verbatim, so keep the full path correct too. Check the live value: `wp option get supawp_options --format=json --path=<wp-root>` |
 
 ### Deploying a New Version
 
