@@ -607,6 +607,40 @@ Update both when:
 - A new route is added to `IMAGE_ROUTING` or `VIDEO_ROUTING`
 - A benchmark closes an open quality constraint (e.g., a tested FACE_IDENTITY alternative)
 
+### Model Monitor Agent (pg-admin) — quality/Elo drift, separate from pricing
+
+The pricing-watcher above only compares **cost**. It has no signal for whether a currently-routed
+model has fallen behind on **quality** — a new model could outrank what we route to without ever
+tripping a pricing alert. `pg-admin/scripts/model-monitor-agent.cjs` (built 2026-07-16) covers
+that gap: it reads postglider-auto's real routing (`lib/config/imageModels.ts`,
+`geminiModels.ts`, fetched live via GitHub's Contents API) and compares it against the public
+Artificial Analysis quality/Elo leaderboard, producing a Gemini-synthesized recommendation report
+in `public.model_monitor_runs`. Report-only — it never changes routing itself, same as
+`pricing_alerts`.
+
+It deliberately does **not** duplicate pricing-watcher's MuAPI-catalog fetch — the two agents are
+complementary, not competing: pricing-watcher owns cost drift, Model Monitor Agent owns quality
+drift. Query recent runs:
+
+```sql
+SELECT created_at, summary, models_reviewed, recommendations_count, raw_report
+FROM model_monitor_runs
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
+Run manually (no cron yet — Cloud Run Job + weekly Scheduler is a planned fast-follow):
+
+```bash
+cd pg-admin
+node --env-file=.env.local scripts/model-monitor-agent.cjs
+```
+
+Requires the `gh` CLI authenticated locally with `repo` scope (used to read postglider-auto's
+private repo contents without provisioning a separate GitHub PAT — a deployed Cloud Run Job will
+need its own `GH_TOKEN` when that fast-follow lands). Full build/verification writeup:
+`research/decisions.md` D-2026-07-16h.
+
 ---
 
 ## Backend Admin API
