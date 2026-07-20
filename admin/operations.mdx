@@ -354,47 +354,41 @@ generation yet. If either ever does, `lib/webhooks/webhookRoute.ts`'s shared ack
 (currently used only by the Replicate route) is already shaped to take a second provider without
 re-deriving the pattern — but there's nothing to build against for Google/OpenAI today.
 
-### MuAPI relationship
+### MuAPI relationship — barred for images (2026-07-20)
 
-We want to like MuAPI. They are genuinely interesting — strong model catalog, competitive pricing on nano-banana-2, and unique video models at accessible price points. At $0.12/image for nano-banana-2, they're 20% cheaper than Replicate ($0.15) for the same underlying Imagen 3 model.
+**MuAPI is barred as a vendor for image generation, period, unless Ken explicitly reopens it.**
+Confirmed live 2026-07-20 (decisions.md D-2026-07-20m) that this has *already happened* in code —
+`lib/config/imageModels.ts`'s `IMAGE_ROUTING` table has zero `MUAPI` entries; every image route
+(`GENERAL`, `GENERAL_COMPLEX`, `PERSON_FOREGROUND`, etc.) is `GOOGLE`, `OPENAI`, or `REPLICATE`.
+The paragraphs that used to live here — "we want to like MuAPI," a price comparison, a policy of
+"use MuAPI where they're the best option" — described a configuration this app no longer runs and
+directly contradicted the current standing order. MuAPI's *video*-generation usage
+(`VIDEO_ROUTING`) is untouched and out of scope for this ban — a separate system, not reopened by
+this entry.
 
-However, MuAPI has demonstrated reliability issues that prevent treating them as a strategic partner:
-- Catalog entries that return 404 on POST (`bytedance-seedream-v5.0`, `google-imagen4` timeouts)
-- Silent breaking changes without notice (`aspect_ratio: "4:5"` dropped, `resolution: "4K"` casing changed)
-- 2.9/5 Trustpilot with a "fake model names" allegation (April 2026)
+### Fallback strategy — OpenAI and Google direct, with a Replicate fallback for stability
 
-**Policy:** Use MuAPI where they're the best option on price/quality. Do not add new MuAPI routes. Benchmark a replacement for `nano-banana-2-edit` (the last hard dependency) when time permits. Full assessment: `research/MuAPI_Strategic_Assessment.md`.
+Neither Google nor OpenAI image generation goes through a circuit-breaker table — both are
+synchronous calls (see "Synchronous vs. async completion" above), and `provider_circuit` was
+checked live 2026-07-20 and confirmed **not to exist** as a table; the "Circuit breaker — GENERAL
+route" section that used to live here (SQL for `provider_circuit`, a 3-failures-opens/10-minutes-
+half-open state machine) documented a feature that was apparently planned but never actually
+shipped.
 
-### Circuit breaker — GENERAL route
+What's real and shipped instead, as of 2026-07-20 (decisions.md D-2026-07-20m): **every OpenAI
+image call in Node code** (`lib/imagegen/openaiImageClient.ts`'s `generateOpenAiImage()` — the one
+shared function every OpenAI caller in this codebase already routes through) falls back to the
+*same* `gpt-image-2` model hosted on Replicate if the direct OpenAI call exhausts its transient
+retries. Passes our own `OPENAI_API_KEY` through Replicate's `openai_api_key` input field, so the
+fallback only costs Replicate's thin infra markup, not a second full OpenAI generation charge —
+"worth a few pennies" for real resilience against an OpenAI-specific outage, per Ken. No stateful
+circuit — a straightforward try-primary/fall-back-on-failure, same shape as
+`riverflowCompletionResolver.ts`'s own scene-fallback. **Never falls back to `gpt-image-1`** — the
+same model (`gpt-image-2`), just via a different host.
 
-The GENERAL route (nano-banana-2 via MuAPI) has an automatic fallback to Replicate `google/imagen-3` (same underlying Imagen 3 model). State is stored in the `provider_circuit` table.
-
-**How it works:**
-- After **3 consecutive MuAPI failures**, the circuit opens
-- All subsequent images in the batch skip MuAPI and use Replicate transparently
-- After **10 minutes**, one probe request tries MuAPI again (half-open)
-- First success resets the circuit to closed
-
-**Check current circuit state:**
-```sql
-SELECT * FROM provider_circuit;
-```
-
-**Manually reset (if you've confirmed MuAPI is back):**
-```sql
-UPDATE provider_circuit
-SET circuit_open = false, consecutive_failures = 0
-WHERE provider = 'muapi_nb2';
-```
-
-**Force-open for testing (routes all GENERAL images to Replicate):**
-```sql
-UPDATE provider_circuit
-SET circuit_open = true, opened_at = now(), consecutive_failures = 3
-WHERE provider = 'muapi_nb2';
-```
-
-The FACE_IDENTITY and PERSON_FOREGROUND routes (nano-banana-2-edit, i2i) have no confirmed fallback provider — they fail cleanly with an error if MuAPI is down.
+No equivalent fallback exists yet for Google (Gemini) image calls — not built, not currently
+planned; Google's own direct-call reliability hasn't shown the same failure pattern that
+motivated this for OpenAI.
 
 ### Current routing — query it, don't read a table
 
