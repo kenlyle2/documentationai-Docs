@@ -321,6 +321,39 @@ remembers to update a doc about it.
   `pricing_alerts` automatically. Check that table for what's stale, don't rely on a
   hand-maintained snapshot here.
 
+### Synchronous vs. async completion — why only Riverflow needs polling/webhooks
+
+Confirmed live 2026-07-20 while root-causing a stuck pack (decisions.md D-2026-07-20e/i/l) — worth
+stating explicitly since it explains a whole class of "why is this image generation hanging"
+questions:
+
+**Google (Gemini/Imagen) and OpenAI (gpt-image-2) image generation in this codebase is fully
+synchronous.** `lib/imagegen/geminiImageClient.ts` and `lib/imagegen/openaiImageClient.ts` both
+make a plain `fetch()` call and hold the connection open until the image bytes come back in that
+*same* HTTP response — no job ID, no "processing" status, no separate check-later step. OpenAI's
+call has a 120s timeout as a safety ceiling; real completions are typically single-digit-to-tens
+of seconds. **There is no async state machine for either provider** — the caller just waits and
+gets its answer.
+
+**Riverflow (via Replicate) is the only provider here that's actually asynchronous** — submit a
+prediction, get back a job id, the real render happens later (~3 minutes measured live, corrected
+from an earlier unverified "~5 minutes" estimate — see `lib/imagegen/riverflowImageClient.ts`).
+That's *why* `image_gen_provenance`, the poll route (`app/api/image/status/[ideaId]/route.ts`),
+and the webhook (`app/api/webhooks/replicate/route.ts` → `lib/imagegen/
+riverflowCompletionResolver.ts`) all exist — they're solving a problem that is structurally
+specific to Riverflow, not a generic "image generation takes a while" concern. Google and OpenAI
+never enter that state, so there's nothing to track, poll, or miss for either of them.
+
+**As of today, neither Google nor OpenAI offers a webhook option for image generation to route
+around this even if we wanted to** — checked directly against both vendors' current docs, not
+assumed: OpenAI's webhook system (Batch jobs, fine-tuning, background Responses, Deep Research,
+Realtime SIP) explicitly does not cover the Images API; Google's Gemini Webhooks API (Beta,
+`v1beta/webhooks`) covers batch processing, interactions, and video generation completion, but
+not image generation. Both vendors have webhook infrastructure — neither has extended it to image
+generation yet. If either ever does, `lib/webhooks/webhookRoute.ts`'s shared ack/log/error shell
+(currently used only by the Replicate route) is already shaped to take a second provider without
+re-deriving the pattern — but there's nothing to build against for Google/OpenAI today.
+
 ### MuAPI relationship
 
 We want to like MuAPI. They are genuinely interesting — strong model catalog, competitive pricing on nano-banana-2, and unique video models at accessible price points. At $0.12/image for nano-banana-2, they're 20% cheaper than Replicate ($0.15) for the same underlying Imagen 3 model.
