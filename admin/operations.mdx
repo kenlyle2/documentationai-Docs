@@ -299,13 +299,27 @@ supabase db push
 
 ### Provider overview
 
-PostGlider routes image generation across three providers. Each was chosen for a specific reason:
+PostGlider routes image generation across multiple providers, chosen per use case (brand
+knowledge, identity compositing, text rendering, cost). **This page deliberately does not
+maintain a hardcoded provider/route/model table** — a prior version did, and it went stale
+within weeks (still listed a retired `UPGRADE` route, still called a completed provider
+migration "pending," still named the wrong Gemini tier for a route that had moved on).
+A table like that can never stay current by hand; the routing logic changes faster than anyone
+remembers to update a doc about it.
 
-| Provider | Used for | Why |
-|---|---|---|
-| **MuAPI** | GENERAL (nano-banana-2), FACE_IDENTITY, PERSON_FOREGROUND | nano-banana-2 (Imagen 3) is AA t2i #3 (Elo 1261). MuAPI is ~20% cheaper than Replicate for nano-banana-2 ($0.12 vs ~$0.15 as of June 2026). They also offer interesting promos and $0.15 video generation (grok-imagine-i2v, AA #4 Elo 1078). |
-| **OpenAI direct** | UPGRADE, EXPLORE_TRADE | gpt-image-2 low at $0.011 — cheapest route with brand knowledge (equipment names). Medium at $0.042 for UPGRADE. |
-| **FAL** | WORKSPACE_REMIX, TEXT_HEAVY | Ideogram v3 — best text rendering, best remix quality from a reference photo. |
+**The real source of truth, always:**
+- **Routing logic** — `lib/config/imageModels.ts` (mirrored to `supabase/functions/_shared/imageModels.ts`).
+  This is the only place route→provider→model decisions are made; read it directly rather than
+  trusting a doc's paraphrase of it.
+- **Current credit costs** — query `operation_pricing` live (see below), not a table in this doc.
+- **What actually ran, for a real image** — query `image_gen_provenance` (per-generation rows:
+  provider, model, routing key, cost, status). This is ground truth for what a given route
+  *actually* used, which can differ from what the routing file currently says if a change
+  hasn't been picked up by every caller yet.
+- **Market-price drift** — the `pricing-watcher` cron (`app/api/cron/pricing-watcher/route.ts`,
+  daily 07:00 UTC) compares current routing costs against alternatives and raises
+  `pricing_alerts` automatically. Check that table for what's stale, don't rely on a
+  hand-maintained snapshot here.
 
 ### MuAPI relationship
 
@@ -349,21 +363,12 @@ WHERE provider = 'muapi_nb2';
 
 The FACE_IDENTITY and PERSON_FOREGROUND routes (nano-banana-2-edit, i2i) have no confirmed fallback provider — they fail cleanly with an error if MuAPI is down.
 
-### Current routing table (June 2026)
+### Current routing — query it, don't read a table
 
-| Route | Provider | Model | Trigger |
-|---|---|---|---|
-| GENERAL | MuAPI → Replicate fallback | nano-banana-2 → google/imagen-3 | Catch-all |
-| EXPLORE_NON_TRADE | OpenAI direct | gpt-image-2 medium | Two-step identity pipeline, non-trade |
-| EXPLORE_TRADE | OpenAI direct | gpt-image-2 low | is_equipment_trade = true |
-| UPGRADE | OpenAI direct | gpt-image-2 medium | stage = UPGRADE |
-| FACE_IDENTITY | Google direct | gemini-3.1-flash-image 1K | identity_policy = FACE_PRESERVE (D016) |
-| PERSON_FOREGROUND | Google direct | gemini-3.1-flash-image 1K | identity_policy = PERSON_SAFE (D016) |
-| WORKSPACE_REMIX | FAL (Ideogram) | fal-ai/ideogram/v3/remix | has_source_image, no identity |
-| TEXT_HEAVY | FAL (Ideogram) | fal-ai/ideogram/v3 | text_required = true |
-| VIDEO_DRAFT | MuAPI | seedance-pro-i2v-fast | video tier = DRAFT |
-| VIDEO_DEFAULT | MuAPI | minimax-hailuo-02-standard-i2v | D014 winner — identity + scene quality |
-| VIDEO_PREMIUM | MuAPI | veo3.1-lite-image-to-video | video tier = PREMIUM |
+No hardcoded routing table lives here (see the note at the top of this section for why). To see
+what's actually routing where right now:
+- Read `lib/config/imageModels.ts` directly for the routing decision per use case.
+- Query `image_gen_provenance` for what a real recent generation actually used.
 
 **Credit costs are live in `operation_pricing`.** Query for current values:
 
@@ -408,11 +413,10 @@ Credit costs are live in `operation_pricing` (keys: `video_draft`, `video_defaul
 SELECT operation_name, credit_cost FROM operation_pricing WHERE routing_key IN ('video_draft', 'video_default', 'video_premium');
 ```
 
-| Tier | Model | Trigger |
-|---|---|---|
-| DRAFT | seedance-pro-i2v-fast | explicit only |
-| **DEFAULT** | **minimax-hailuo-02-standard-i2v** | Make Reel button + Person in Scene auto-trigger |
-| PREMIUM | veo3.1-lite-image-to-video | explicit only |
+Which model backs each tier is a routing decision, not a doc fact — read `lib/config/imageModels.ts`
+for the current DRAFT/DEFAULT/PREMIUM → model mapping rather than trusting a table here. DEFAULT
+fires automatically on the Make Reel button and the Person in Scene auto-trigger; DRAFT/PREMIUM
+are explicit-only.
 
 ### Person in Video (auto-trigger)
 
@@ -532,22 +536,21 @@ PostGlider runs a daily cron that compares current routing costs against market 
 
 ### Current alerts the watcher will raise
 
-| Route | Current | Alternative | Savings | Status |
-|---|---|---|---|---|
-| GENERAL | MuAPI nano-banana-2 @ $0.12 | Google Gemini 3.1 Flash @ $0.067 | **44%** | Pending migration — GOOGLE provider ready in code |
+Don't read this as a static list — a hardcoded example here (GENERAL: MuAPI → Google, "pending
+migration") went stale after the migration it described actually shipped, and nobody updated the
+doc. Query the live table instead:
 
-### The GENERAL route migration path ($0.12 → $0.067)
+```sql
+SELECT routing_key, current_provider, current_model, current_cost_usd,
+       alt_provider, alt_model, alt_cost_usd, savings_pct, quality_note, created_at
+FROM pricing_alerts
+WHERE status = 'open'
+ORDER BY created_at DESC;
+```
 
-MuAPI charges $0.12 for nano-banana-2 (Imagen 3). Google's own API charges $0.067 at 1K. Same model weights, no quality difference.
-
-**Status:** The GOOGLE provider in `execute-image` edge function is ready. To complete migration:
-1. Ensure `GOOGLE_AI_API_KEY` env var is set (Vercel + `.env.local`)
-2. Update `IMAGE_ROUTING.GENERAL` in `lib/config/imageModels.ts` from `MUAPI` to `GOOGLE`
-3. Mirror to `supabase/functions/_shared/imageModels.ts`
-4. Run `npx tsc --noEmit` + smoke test one generation
-5. Dismiss the open `pricing_alerts` entry for GENERAL after routing is changed
-
-Since PostGlider's pipeline is already async (Supabase Realtime), no user-facing change required.
+An open row here means a real, currently-unactioned savings opportunity the watcher found —
+check `lib/config/imageModels.ts` to confirm the route hasn't already been migrated by a change
+that predates the watcher dismissing its own alert.
 
 ### Pricing context — market price ≠ what PostGlider pays
 
@@ -1395,6 +1398,95 @@ clone of the fork.
 viralityAgent.ts` needs to call it with the citation's resolved topic and thread the result into
 ViralTrends' EXPLAIN instruction. Full history and reasoning: `docs/Building-Agents.md` §
 "Grounding the EXPLAIN step" and `docs/adr/ADR002-30days-agent-x-tiktok.md` in `postglider-auto`.
+
+### Influencer Inputs
+
+Distinct from the Virality Agent above: virality only cites a post that beats an account's own
+baseline 3x, so a steady, reliably-high-performing account never wins a citation — it doesn't
+spike, it's just consistently good. Influencer Inputs instead surfaces the top-N highest-value
+national accounts' most recent post regardless of performance, on the theory that "what are the
+biggest names in this niche doing right now" is useful on its own. Same grounded-citation
+synthesis rules as Virality (never invent a location/theme the caption doesn't literally
+support). `lib/autonomous/influencerAgent.ts`, standalone route
+`app/api/autonomous/prefetch/influencer/route.ts`.
+
+### Shared account-post cache (2026-07-20)
+
+National-tier accounts are explicitly "best-in-class niche accounts regardless of location" —
+every business in a niche (every tattoo shop, say) independently discovers and tracks the same
+handful of famous handles. Before this fix, `getAccountPosts()` hit ScrapeCreators live on every
+call with zero caching, so N businesses tracking the same account cost N identical ScrapeCreators
+fetches *and* N identical Gemini synthesis calls, every cron cycle — pure duplicated vendor spend
+that scales with client count in a niche, not with actual distinct content.
+
+Fixed with `autonomous.account_post_cache`, a table keyed `(platform, handle)` — not per-tenant —
+with a 6-hour TTL. `getAccountPosts()` (`lib/autonomous/viralityAgent.ts`, shared by both agents)
+checks this cache before ever calling ScrapeCreators. Migration:
+`20260720260000_shared_account_post_cache.sql`.
+
+<Callout kind="warning">
+This only dedupes the *post-fetch* step. It does **not** stop duplicate *discovery* — each
+business profile still independently runs the full Outscraper + ScrapeCreators + Gemini
+classification pipeline (`app/api/autonomous/prefetch/discovery/route.ts`) to arrive at tracking
+a given handle in the first place. A niche-pool-sharing layer for discovery itself is designed
+but deliberately deferred — see `~/.claude/plans/polished-prancing-puzzle.md` in the workspace
+root for the full three-layer design (shared discovery pool, `classification_codes`-weighted
+secondary-niche blending, and the personalized-accounts cap below). Only the personalized-cap
+layer has shipped so far.
+</Callout>
+
+### Personalized accounts — up to 5 per business (2026-07-20)
+
+A business can have up to 5 hand-picked influencer/virality accounts that always surface ahead of
+the normal `value_score` ranking, regardless of how they were tracked — the answer for a
+genuinely idiosyncratic specialty a niche-wide signal can't guess (a tattoo shop's coverup
+specialty, a goat-cheese Italian restaurant, a tree-service landscaper).
+
+Implementation: `autonomous.competitor_accounts.is_personalized` (boolean, default false), capped
+at 5 per `business_profile_id` by a DB trigger (`enforce_max_personalized_accounts`). RPCs
+`autonomous_set_personalized_account()` / `autonomous_unset_personalized_account()`, wrapped by
+`setPersonalizedAccount()`/`unsetPersonalizedAccount()` in `lib/autonomous/db.ts`.
+`autonomous_get_competitor_accounts()` sorts `is_personalized DESC` first, so personalized picks
+are never pushed out by the `LIMIT`. Migration:
+`20260720270000_personalized_competitor_accounts.sql`.
+
+Neither `viralityAgent.ts` nor `influencerAgent.ts` needed changes — both already read through
+`getCompetitorAccounts()`, so personalized picks flow into candidate generation automatically.
+
+<Callout kind="info">
+**UI shipped 2026-07-20** — `components/settings/CompetitorsCard.tsx` (Settings → Competitors).
+A competitor row needs an `instagram_handle` (new field, same component) before it can be
+flagged with the star icon. Note the two-table wrinkle this UI bridges: `public.competitors` is
+the user-facing comparison list (name/reviews/tone/etc.), while the personalized flag actually
+lives on `autonomous.competitor_accounts` (agent-only) — `PATCH /api/competitors` with
+`{ id, toggle_personalized }` looks up the competitor's handle and calls
+`autonomous_set_personalized_account()`/`autonomous_unset_personalized_account()` to mirror the
+flag onto the matching (or newly created) `competitor_accounts` row. `GET /api/competitors`
+joins `is_personalized` back in per row (service-role read — RLS on `autonomous.competitor_accounts`
+is service-role-only) plus a `personalizedCount`/`personalizedLimit` pair for the UI's 5-cap
+messaging.
+</Callout>
+
+### Known gaps found running a real client's Ultimate Batch (2026-07-20)
+
+Found running Mike Brown's (Stay True Tattoo) real production batch — both real, both still open:
+
+1. **A business must be manually added to `autonomous_get_enabled_profiles()` before Discovery,
+   Virality, or Influencer will ever run for it.** Mike's real paying account had zero
+   `competitor_accounts` rows because Discovery had never run for him in production — not a bug
+   in Discovery itself, just a missing enablement step nobody had done for his account. Worth an
+   onboarding-checklist item: confirm a new autonomous client is actually in the enabled-profiles
+   set, not just that their profile exists.
+2. **Website-mined vault images (`user_images.origin = 'website'`) are stored with the live
+   external URL, never re-hosted into Supabase Storage.** The image-generation pipeline's SSRF
+   guard (`lib/imagegen/validateImageRefs.ts`) correctly rejects any non-Storage origin as a
+   generation input — so the moment content-matching picks a website-mined image as a reference
+   (even a mismatch, e.g. a shop logo picked for a tattoo coverup post), generation fails with
+   `Image URL is not from an approved storage origin`. Only Instagram-mined images have ever been
+   deliberately re-hosted (a one-off for a single team member's photo, `D-2026-07-18g` in
+   `research/decisions.md`). This is a systemic gap for every `origin='website'` row across every
+   client, not specific to Mike — re-hosting at ingest time (mirroring the pattern already used
+   for `websiteIntelligence.ts`'s own storage uploads) is the real fix, not yet built.
 
 ---
 
