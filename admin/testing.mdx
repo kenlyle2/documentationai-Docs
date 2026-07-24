@@ -147,6 +147,44 @@ same-domain callback URL from the session fragment instead of trusting Supabase'
 since been added to the allow-list, so `redirect_to` works correctly now too — the workaround
 stays in place since it's harmless and more explicit about which URL gets used.
 
+### `test-single-post.cjs` (postglider-auto repo root — not `scripts/`)
+
+The cheapest possible real-pipeline test: exactly **one** manual post box (WITP pick → AI Image
+merge → Save Post → Create My Batch), no orchestrator, no candidates, no hybrid batch, no backlog.
+Built 2026-07-24 while verifying the WITP identity-lock fix; kept in the toolbox as a reusable
+spot-check for any single-image generation-path change, since it burns one generation instead of
+a full Ultimate Batch worth of Replicate/Riverflow credit.
+
+Logs in via the same passwordless magiclink mechanism as `admin-reset-usage.cjs`, then drives the
+real `/generate` UI directly with Playwright: select profile → batch size 1 → pick a "Who's in
+this post?" chip → expand a content category → pick an item chip → type post direction text →
+Add to Post → AI Image → Save Post → Create My Batch → poll for the generating spinner to clear.
+
+```bash
+node test-single-post.cjs [options]
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--email <email>` | `notmichaelbrown@gmail.com` | Login email |
+| `--profile <label>` | `Stay True Tattoo` | Business profile visible-text label to select |
+| `--witp <name>` | any non-"Mike Brown" chip | Substring to match the WITP chip by — the default deliberately avoids the default identity, to prove a WITP fix isn't just falling back to it |
+| `--category <label>` | `Story-Based` | Top-level content-direction category to expand. Pass an empty string to use a top-level freeform chip instead (`--item` is ignored in that case) |
+| `--item <label>` | `A Lesson I Learned This Week` | Specific item chip under that category |
+| `--text <text>` | pickle-jar test line | Post direction text typed into the field |
+| `--headless` | off (headed) | Run headless instead of the default headed window |
+| `--dev` | off (production) | Target `localhost:3000` instead of `autonomous.postglider.com` |
+| `--max-wait <seconds>` | `180` | How long to wait for generation to finish before giving up |
+
+**When to reach for it:** a fast, cheap spot-check when only one generation path needs verifying
+(e.g. a WITP/identity fix, an equipment-routing change, a prompt tweak) — instead of running a
+full Ultimate Batch just to exercise one image.
+
+<Callout kind="warning">
+  Same rule as `admin-reset-usage.cjs`: never `console.log` the magiclink callback URL or
+  `page.url()` right after navigating to it — both carry a live bearer token.
+</Callout>
+
 ### `regenerate-pack-rationale.mjs` (`pg-projects/scripts/autonomous/` — shared, not postglider-auto's own)
 
 Rebuilds and re-saves an already-created pack's stored "Why this batch" rationale using the
@@ -819,7 +857,22 @@ The functional tests (`app-*`, `onboard-*`, `e2e-*`) prove that the product work
 
 For PostGlider's image generation pipeline specifically, unit tests matter because the routing decisions (which model, which provider, which price tier) are pure logic — they are deterministic calculations over a small set of fields. A functional test can confirm that an image was generated, but it cannot efficiently check all the edge cases: what happens when a landscaping business gets combined with a face-identity request? What if the equipment brand name is already in the prompt? A unit test checks each of these scenarios in milliseconds, with zero API cost.
 
-The `imagegen-*` scripts form a **test pyramid** — the base layer (01–05) tests logic, the top layer (07) tests the boundary between our code and an external API, and the functional tests above verify the full user journey.
+The `imagegen-*` scripts form a **test pyramid** — the base layer (01–05) tests logic, the top layer (07–08) tests the boundary between our code and an external API, and the functional tests above verify the full user journey.
+
+<Callout kind="warning">
+  **Fixed 2026-07-03 — the sync-guard had been silently broken.** `imagegen-02-policy` and
+  `imagegen-05-fixtures` each read `lib/config/imageGenPolicy.ts` to assert their inlined rule
+  copies match production. Both resolved the path as `path.join(__dirname, '..', 'lib', ...)` —
+  but `scripts/` is a symlink into the shared `pg-projects` meta-repo (see `postglider-auto`'s
+  `CLAUDE.md`), so `__dirname` resolves through the symlink and `'..'` lands in `pg-projects/`,
+  not `postglider-auto/`. The sync-guard test had been throwing `ENOENT` and failing on every run
+  — which meant nobody was actually comparing the inlined rules against production. They had
+  drifted significantly: both files still tested a two-tier `UPGRADE` stage retired by
+  `D-2026-06-20a` (the `GenStage` type no longer even allows constructing it), and
+  `rule-workspace-remix`'s priority was stale (550 instead of the real 750). Both files rewritten
+  to the correct path and current production rules, including new coverage for
+  `rule-item-composite` (D-2026-07-03d).
+</Callout>
 
 ---
 
@@ -828,7 +881,7 @@ The `imagegen-*` scripts form a **test pyramid** — the base layer (01–05) te
 No dev server required. These scripts run anywhere Node.js is installed.
 
 ```bash
-node scripts/run-all.cjs imagegen          # all seven scripts in order (~5 seconds total)
+node scripts/run-all.cjs imagegen          # all eight scripts in order (~5 seconds total)
 
 # Or individually:
 node scripts/imagegen-01-sanitize.cjs
@@ -837,6 +890,7 @@ node scripts/imagegen-03-cohort.cjs
 node scripts/imagegen-04-normalize.cjs
 node scripts/imagegen-05-fixtures.cjs
 node scripts/imagegen-07-composite.cjs
+node scripts/imagegen-08-remix-composite.cjs
 ```
 
 | Script | What it tests |
@@ -846,7 +900,8 @@ node scripts/imagegen-07-composite.cjs
 | `imagegen-03-cohort` | Canary rollout gate: cohort assignment, percentage thresholds, and determinism |
 | `imagegen-04-normalize` | `normalizeIntent()` signal-to-intent mapping: identity policy, equipment-trade derivation, brand name injection |
 | `imagegen-05-fixtures` | 15 end-to-end routing scenarios — each confirms the full `normalizeIntent → policyEngine` pipeline produces the expected routing decision |
-| `imagegen-07-composite` | Google Gemini adapter for identity composites — HTTP mock tests that cover response parsing, error paths, and request shape |
+| `imagegen-07-composite` | Google Gemini adapter for identity composites (`personInSceneComposite`) — HTTP mock tests that cover response parsing, error paths, and request shape |
+| `imagegen-08-remix-composite` | Google Gemini adapters for `sceneRemix` (single-image workspace remix) and `compositeImages` (generic 2-image composite, "AI Assisted") — same HTTP mock coverage as `imagegen-07`, plus validation tests (`sceneRemix` requires `imageUrl`; `compositeImages` requires exactly 2 images) and a check that `compositeImages`'s prompt never contains face/identity language |
 
 ---
 
@@ -955,7 +1010,7 @@ Tests `normalizeIntent()` — the function that translates raw UI signals (what 
 
 **New tests added (2026-06-05) — equipment-trade derivation:**
 
-The `is_equipment_trade` field determines whether a business should use gpt-image-2 (brand knowledge, better for Toro mowers and DeWalt tools) versus nano-banana-2 (better scene quality for everything else). The derivation has two paths:
+The `is_equipment_trade` field determines whether a business should use gpt-image-2 (brand knowledge, better for Toro mowers and DeWalt tools) versus Gemini 3.1 Flash Image (better scene quality for everything else). The derivation has two paths:
 
 1. **DB-cached value** — `business_profiles.is_equipment_trade` was set when the profile was created or classified. This is preferred and trusted directly.
 2. **Regex fallback** — if the DB value is `null` (unclassified profile, or a request built from a legacy code path), the function tests the `industry` text string against a pattern that matches landscaping, HVAC, plumbing, roofing, electrical, auto repair, and related trades.
@@ -999,7 +1054,7 @@ This script runs 15 scenarios through the complete `normalizeIntent → policyEn
 | f13 | Equipment-trade via industry text (regex fallback) | EXPLORE_TRADE |
 | f14 | Equipment-trade + face reference | FACE_IDENTITY (priority 800 > 50) |
 
-**Why f01 and f10 changed:** These fixtures previously expected `EXPLORE` (the old catch-all route key). The production catch-all was renamed to `GENERAL` when nano-banana-2 via MuAPI replaced the previous default provider. The test was asserting a route that no longer exists — it was passing against the stale inlined rules but would have produced the wrong model in production.
+**Why f01 and f10 changed:** These fixtures previously expected `EXPLORE` (the old catch-all route key). The production catch-all was renamed to `GENERAL` when Gemini 3.1 Flash Image via MuAPI replaced the previous default provider. The test was asserting a route that no longer exists — it was passing against the stale inlined rules but would have produced the wrong model in production.
 
 **Fixtures f12 and f13 are new.** Before 2026-06-05, the EXPLORE_TRADE route — responsible for routing landscapers, HVAC technicians, roofers, and plumbers to gpt-image-2 (which knows real equipment brand names) — had zero routing fixture coverage. If the `rule-explore-trade` rule was accidentally removed or its priority changed, no test would catch it.
 
@@ -1065,7 +1120,7 @@ These `.mjs` scripts live at the `postglider-auto` repo root (not in `scripts/`)
 | Script | What it tests | Run command |
 |---|---|---|
 | `test-equipment-imagegen.mjs` | Full Trade route Step 1: keyword-matches 3 landscaper captions against `brand_assets.ai_tags`, generates an equipment rider via Gemini Flash, enriches the prompt, calls gpt-image-2 low, saves PNGs to `scripts/output/` | `node test-equipment-imagegen.mjs` |
-| `test-gemini-finisher.mjs` | Step 2 identity composite in isolation: loads an existing scene PNG + a headshot URL, runs the expanded `identityInsert` guardrail (face swap + sign removal + misalignment fix), saves result to `scripts/output/`. Default model is NB 2.5 (`gemini-2.5-flash-image`, $0.067); `--pro` flag switches to NB 3 Pro (`gemini-3-pro-image`, $0.134) | `node test-gemini-finisher.mjs` / `node test-gemini-finisher.mjs --pro` |
+| `test-gemini-finisher.mjs` | Step 2 identity composite in isolation: loads an existing scene PNG + a headshot URL, runs the expanded `identityInsert` guardrail (face swap + sign removal + misalignment fix), saves result to `scripts/output/`. Default model is `gemini-2.5-flash-image` ($0.067); `--pro` flag switches to `gemini-3-pro-image` (~$0.529/image — corrected 2026-07-16, token-billed, was wrongly documented as $0.134) | `node test-gemini-finisher.mjs` / `node test-gemini-finisher.mjs --pro` |
 
 Output files land in `scripts/output/` (gitignored). Upload to `user-gallery-images` bucket for a shareable URL if needed.
 
@@ -1090,6 +1145,10 @@ This table is updated whenever a billing, auth, or subscription change ships wit
 | Autonomous pipeline E2E | — | No test covered the full new-user → autonomous batch → pack-verified journey. | 2026-06-18 | 2026-06-18 (`app-17-autonomous-e2e` — 7 phases: registration, profile verify, enable autonomous, trigger orchestrator, poll batch, verify DB, render pack page) |
 | `e2e-generate` vault assertions | `e2e-generate` | ~~Vault tests waited for "Approve"/"Add to Pack" which never appear after single-photo vault generation (effectiveBatchSize=1 → GEN_COMPLETE → review state)~~ | Since vault route added | 2026-06-11 (`e2e-generate.cjs` — vault assertions rewritten to waitForResponse + button re-enable) |
 | `e2e-generate` VaultPickerModal origin filter | `e2e-generate` | ~~`setupProfile()` keeperIds query included ai_generated images; VaultPickerModal only shows upload/gmb — setup kept invisible images, vault picker showed 0 tiles~~ | Since vault route added | 2026-06-11 (`e2e-generate.cjs` — added `origin=in.(upload,gmb)` to keeperIds query) |
+| `imagegen-02`/`imagegen-05` sync-guard path | `imagegen-02`, `imagegen-05` | ~~Sync-guard resolved `lib/config/imageGenPolicy.ts` relative to the `scripts/` symlink's real target (`pg-projects/`) instead of `postglider-auto/` — threw ENOENT and had been silently failing every run, so inlined rules drifted undetected: a retired two-tier `UPGRADE` stage and a stale `rule-workspace-remix` priority (550, not 750)~~ | Unknown — since whenever the `scripts/` symlink was introduced | 2026-07-03 (both files: fixed path, removed retired `UPGRADE` fixtures/rules, added `rule-item-composite` coverage) |
+| `sceneRemix`/`compositeImages` Gemini adapters | — | ~~Zero unit test coverage for either new function (D-2026-07-03c/d) — same silent-failure class `imagegen-07` already exists to catch for `personInSceneComposite`, but neither new function had a sibling test~~ | Since D-2026-07-03c/d shipped | 2026-07-03 (`imagegen-08-remix-composite` — 16 HTTP mock tests) |
+| "AI Assisted" (`MULTI_IMAGE_COMPOSITE`) live generation | — | New 2-image composite feature (D-2026-07-03d) verified only at the UI-mechanics level (picker, button enablement) — no test has confirmed a real generated image lands correctly via this path | 2026-07-03 | Open |
+| `WORKSPACE_REMIX` via `/generate` (Passenger, real account) | — | D-2026-07-03c's Gemini migration was verified live only through the onboarding trial demo route (`/api/start/generate-image`) — the main app's `/generate` → `execute-image` path for a workspace-only business has not been exercised by any automated test | 2026-07-03 | Open |
 
 ---
 
