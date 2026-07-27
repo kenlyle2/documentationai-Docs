@@ -866,6 +866,80 @@ move — only *who calls it* does. See `pg-admin/TASKS.md`.
 
 ---
 
+## Business Profile Creation — Shared Onboarding Pipeline
+
+Three separate entry points create a `business_profiles` row: the real onboarding wizard
+(`/onboarding`, including its `/free-trial` cold-start variant), **Demo Gun** (sales/admin-only
+prospect demos), and `/profiles/new` (additional profiles on an existing account, up to its
+plan's cap). All three now call one shared server-side pipeline instead of maintaining separate
+copies — this wasn't always true, and the drift between copies was a real problem (see below).
+
+### The shared pipeline
+
+```mermaid
+flowchart TD
+    A["/onboarding wizard<br/>(any authenticated or anonymous user)"] -.->|"POST /api/onboarding/run<br/>url / placeId / manual / existingProfileId"| P
+    B["Demo Gun<br/>(is_admin OR is_sales only)"] -.->|"POST /api/demo/run<br/>url / placeId"| P
+    C["/profiles/new<br/>(existing account, 2nd/3rd profile)"] -.->|"POST /api/onboarding/run<br/>manual, source: 'profiles-new'"| P
+
+    P["lib/onboarding/runOnboardingPipeline.ts"] --> S1[Enrich URL <i>or</i> manual-entry lookup]
+    S1 --> S2[Create / patch business_profiles row]
+    S2 --> S3[Seed services]
+    S3 --> S4[Seed glossary terms]
+    S4 --> S5[Queue Outscraper + GMB photo import]
+    S5 --> S6[Classify niche — NAICS / SIC]
+    S6 --> S7[Trigger competitor-finder]
+    S7 --> S8[Trigger generate-service-intelligence]
+    S8 --> S9[Generate niche content intelligence — GPT-4o]
+    S9 --> S10[Fire Loops event + /social-prompt workflow]
+```
+
+### What each caller keeps to itself
+
+| Caller | Auth | Route | Input it can send | `business_profiles.onboarding_source` |
+|---|---|---|---|---|
+| `/onboarding` wizard | Any authenticated session, or anonymous (`/free-trial`) via Bearer token | `POST /api/onboarding/run` | `url`, `placeId`, `manual`, or `existingProfileId` | `'onboarding'` (URL/placeId scan) or `'manual'` (cold-start, no website/listing) |
+| Demo Gun | `profiles.is_admin = true` OR `profiles.is_sales = true` — gated in `/api/demo/run` itself | `POST /api/demo/run` | `url` or `placeId` only — no `manual`/`existingProfileId` | `'demo'` |
+| `/profiles/new` | Any authenticated user, subject to the account's profile cap (`profiles.profiles_allowed`; `is_admin` accounts bypass the cap) | `POST /api/onboarding/run` with `{ manual: {...}, source: 'profiles-new' }` | `manual` only | `'profiles-new'` |
+
+### Why this was consolidated (2026-07-27)
+
+Demo Gun's server route (`/api/demo/run`) had been a hand-copied near-duplicate of the wizard's
+`/api/onboarding/run` — same enrich→profile→services→classify→intelligence shape, but it had
+silently drifted behind: missing the `competitor-finder` trigger, `generate-service-intelligence`
+trigger, glossary seeding, the Loops `profile_created` event, and the `/social-prompt` workflow
+trigger — all added to the real pipeline after Demo Gun was originally built. Every prospect demo
+was quietly weaker than what a real signup got, and nobody had decided that on purpose.
+`/profiles/new` was further behind still: it had no enrichment/classification/intelligence
+pipeline at all, just a bare `business_profiles` insert plus a `seedGlossary()` call and a
+fire-and-forget ping to `/api/classify-niche`.
+
+All three callers now share `lib/onboarding/runOnboardingPipeline.ts` (server pipeline) and
+`lib/onboarding/consumePipelineStream.ts` (client-side SSE consumption, previously copy-pasted
+identically into `DemoGun.tsx` and `app/onboarding/page.tsx`). See `decisions.md` D-2026-07-27b
+for the full writeup, including three product-policy calls confirmed before shipping: fire the
+Loops event + `/social-prompt` trigger for every profile regardless of count (not just the
+account's first), give Demo Gun the full pipeline despite the extra per-demo API cost, and show
+live pipeline progress on `/profiles/new` instead of an instant redirect — creation there is no
+longer instant (real enrichment/lookup + classification + GPT-4o intelligence, not a bare insert).
+
+### Interaction with the purchase-to-production test suite
+
+`tests/e2e-integrated/`'s 5-phase suite (`run-all.ts`) simulates a brand-new PG-PRO-3 purchase
+end to end (WooCommerce order → Supabase provisioning → UI verification → content generation →
+subscription lifecycle). **Phase 3's Uilicious run (`Billing And Profiles.test.js`) is the one
+that exercises `/profiles/new`** — it creates 3 profiles up to the account's cap, then confirms
+the 4th attempt is blocked with "Profile limit reached." Since `/profiles/new` now runs the real
+pipeline instead of an instant insert, profile creation there takes real seconds instead of
+milliseconds — the test's wait after each "Create profile" click was increased from `I.wait(3)`
+to `I.wait(45)`, with an added assertion that the redirect to the new profile's own page actually
+landed rather than trusting the timer alone. **Phase 4** (`phase4-content-generation.ts`) already
+depended on Phase 3 having created a real `business_profiles` row to generate against — that
+dependency is unchanged, but the profile it now targets arrives fully classified with content
+intelligence already generated, not just a bare row.
+
+---
+
 ## Client Onboarding Checklist
 
 <Steps>
@@ -894,23 +968,29 @@ Some businesses signing up have neither a website nor a Google Business Profile 
 common for brand-new trades/local-service businesses. Both onboarding entry points
 (`/free-trial` and `/onboarding`) now handle this without forcing the owner to invent a URL.
 
-### The two entry points
+### The two cold-start entry points (plus a third caller that's always manual)
 
 | Entry point | Who uses it | Cold-start UI |
 |---|---|---|
 | `/free-trial` | Anonymous, pre-signup demo flow | "Do you have a website?" → No → "Google Business Listing?" → No → manual business/profile questions |
 | `/onboarding` | Authenticated users completing setup | `BusinessFinder`'s third link, "I don't have a website or a Google listing" |
 
-Both paths converge on the same server-side code — `POST /api/onboarding/run` with a `manual`
+`/profiles/new` (additional profiles on an existing account, see [Business Profile Creation —
+Shared Onboarding Pipeline](#business-profile-creation-shared-onboarding-pipeline) above) also
+always sends `manual` — its form never offers a URL/GBP scan option at all, unlike the two
+entries above where manual is a fallback among several choices.
+
+All three converge on the same shared pipeline —
+`lib/onboarding/runOnboardingPipeline.ts`, called via `POST /api/onboarding/run` with a `manual`
 body field instead of `placeId`/`url` — so a cold-start signup gets the identical profile shape
-(GPT-based niche classification, service seeding, content-intelligence generation) as a
-URL-scanned one, just without the enrichment scan step.
+(GPT-based niche classification, service seeding, glossary seeding, content-intelligence
+generation) as a URL-scanned one, just without the enrichment scan step.
 
 ### What's built
 
 | Component | Path | Purpose |
 |---|---|---|
-| **Manual body field** | `app/api/onboarding/run/route.ts` | Accepts `manual: { name, location, industry, service_promoted, target_audience, customer_result, tone, business_differentiation }`. Skips business-enrichment entirely, builds the same internal shape a website scan would have produced, and reuses the existing create/patch-profile code unchanged. Writes `business_profiles.onboarding_source = 'manual'`. |
+| **Manual body field** | `lib/onboarding/runOnboardingPipeline.ts` (called from `app/api/onboarding/run/route.ts`) | Accepts `manual: { name, location, industry, service_promoted, target_audience, customer_result, tone, business_differentiation, image_prompt_override }`. Skips business-enrichment entirely, builds the same internal shape a website scan would have produced, and runs through the identical create/patch-profile pipeline every other caller uses. Writes `business_profiles.onboarding_source` to `'manual'` (wizard cold-start) or whatever the caller passes via the route's optional `source` field (`'profiles-new'` for the `/profiles/new` caller). |
 | **Third BusinessFinder link** | `components/onboarding/BusinessFinder.tsx` | "I don't have a website or a Google listing" — appears below both the search and URL options (a fallback, not a default) on `/onboarding` for users who never went through `/free-trial`. |
 | **Manual entry steps** | `app/onboarding/page.tsx` (`MANUAL_BUSINESS`/`MANUAL_PROFILE` states) | Reuses the same `StepBusiness`/`StepProfileBuilder` components `/free-trial` already uses. Turnstile is skipped here (`/onboarding` already requires an authenticated session, unlike the anonymous public `/free-trial` entry). |
 | **Skip-forward fix** | `app/onboarding/page.tsx` init effect | If an existing incomplete profile has `website_url` AND `google_maps_url` both null (i.e. it already went through the cold-start path once, typically via `/free-trial`), the pipeline runs immediately via `existingProfileId` alone — the user is never sent back through `BusinessFinder` to answer the same questions twice. |
