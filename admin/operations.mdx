@@ -105,7 +105,7 @@ Fetched at runtime by `fetchPlanLimitsForTier()` (`lib/utils/planLimits.ts`). Ha
 
 **Daily:** Lazy. `useUsageStats` treats `usage_daily` as 0 when `last_generation_date < today`. The actual DB counter resets inside `charge_credits_atomic` on the first generation of the new day.
 
-**Monthly — authoritative source:** The `wpsubscription-webhook` edge function is the single source of truth. On every `status: active` event from WooCommerce (new subscription OR renewal), it writes `usage_monthly = 0`, `usage_daily = 0`, `usage_reset_date = today`. The billing cycle is defined by WooCommerce's renewal schedule, not the user's signup date. There is no client-side billing cycle calculation — do not add one.
+**Monthly — authoritative source:** The `wpsubscription-webhook` route (`postglider-auto`'s Cloud Run app, migrated off Supabase Edge Functions 2026-07-31) is the single source of truth. On every `status: active` event from WooCommerce (new subscription OR renewal), it writes `usage_monthly = 0`, `usage_daily = 0`, `usage_reset_date = today`. The billing cycle is defined by WooCommerce's renewal schedule, not the user's signup date. There is no client-side billing cycle calculation — do not add one.
 
 ### Credit deduction flow
 
@@ -122,7 +122,7 @@ UI → normalizeIntent() → planExecutor()
 
 ### Subscription status mapping
 
-The `wpsubscription-webhook` maps WooCommerce statuses to canonical billing states:
+The `wpsubscription-webhook` route maps WooCommerce statuses to canonical billing states:
 
 | WooCommerce status | Canonical status | Tier effect |
 |---|---|---|
@@ -354,17 +354,16 @@ generation yet. If either ever does, `lib/webhooks/webhookRoute.ts`'s shared ack
 (currently used only by the Replicate route) is already shaped to take a second provider without
 re-deriving the pattern — but there's nothing to build against for Google/OpenAI today.
 
-### MuAPI relationship — barred for images (2026-07-20)
+### MuAPI relationship — removed entirely (2026-07-31)
 
-**MuAPI is barred as a vendor for image generation, period, unless Ken explicitly reopens it.**
-Confirmed live 2026-07-20 (decisions.md D-2026-07-20m) that this has *already happened* in code —
-`lib/config/imageModels.ts`'s `IMAGE_ROUTING` table has zero `MUAPI` entries; every image route
-(`GENERAL`, `GENERAL_COMPLEX`, `PERSON_FOREGROUND`, etc.) is `GOOGLE`, `OPENAI`, or `REPLICATE`.
-The paragraphs that used to live here — "we want to like MuAPI," a price comparison, a policy of
-"use MuAPI where they're the best option" — described a configuration this app no longer runs and
-directly contradicted the current standing order. MuAPI's *video*-generation usage
-(`VIDEO_ROUTING`) is untouched and out of scope for this ban — a separate system, not reopened by
-this entry.
+**MuAPI is not used anywhere in this app, for anything, as of 2026-07-31.** It was already barred
+for image generation since 2026-07-20 (`lib/config/imageModels.ts`'s `IMAGE_ROUTING` table had
+zero `MUAPI` entries — every image route is `GOOGLE`, `OPENAI`, or `REPLICATE`), and its one
+remaining use — video generation (`VIDEO_ROUTING`, the "Make Reel" feature) — was removed entirely
+2026-07-31 (reliability concerns, near-zero real usage, no vendor met the app's quality bar; see
+the "Video Generation — REMOVED" section below and `decisions.md` D-2026-07-31k). There is no
+`MUAPI_API_KEY` anywhere live (Cloud Run env, Supabase Edge Function secrets, or `.env.local`) and
+no code path that calls `api.muapi.ai`.
 
 ### Fallback strategy — OpenAI and Google direct, with a Replicate fallback for stability
 
@@ -408,135 +407,17 @@ ORDER BY operation_name;
 
 ---
 
-## Video Generation — Operations
+## Video Generation — REMOVED (2026-07-31)
 
-### Architecture
-
-Video generation is fully async. The flow is:
-
-```
-User clicks Make Reel (or auto-trigger fires on Person in Scene)
-  → POST /api/generate/video
-      → execute-video edge function
-          → writes video_gen_provenance (status=submitted)
-          → stamps generated_ideas.video_submitted_at
-          → POST api.muapi.ai/{model} with webhook_url
-  → MuAPI processes (~55–180s depending on tier)
-      → POST muapi-webhook edge function
-          → downloads video from MuAPI CDN
-          → stores in Supabase Storage (generated-videos bucket)
-          → updates generated_ideas.video_url + video_status=completed
-          → updates video_gen_provenance with duration_ms + cost
-          → Realtime broadcast → UI shows "Your reel is ready!"
-```
-
-**Webhook failure fallback:** MuAPI webhooks are unreliable. If the webhook doesn't fire, the client polls `GET /api/video/status/{ideaId}` starting at `p50 × 0.75` of average duration, every 15s. The polling endpoint calls MuAPI's result endpoint directly and handles the full completion flow (download, store, update DB) if the webhook missed.
-
-### Video tiers and credit costs
-
-Credit costs are live in `operation_pricing` (keys: `video_draft`, `video_default`, `video_premium`). Current values:
-
-```sql
-SELECT operation_name, credit_cost FROM operation_pricing WHERE routing_key IN ('video_draft', 'video_default', 'video_premium');
-```
-
-Which model backs each tier is a routing decision, not a doc fact — read `lib/config/imageModels.ts`
-for the current DRAFT/DEFAULT/PREMIUM → model mapping rather than trusting a table here. DEFAULT
-fires automatically on the Make Reel button and the Person in Scene auto-trigger; DRAFT/PREMIUM
-are explicit-only.
-
-### Person in Video (auto-trigger)
-
-When a user has **Person in Scene** enabled on the generate page, Make Reel fires automatically as soon as the composite image arrives — no button press needed. The user sees "Generating your reel in the background…" immediately, then "Your reel is ready!" when done (~90s for DEFAULT).
-
-The reel uses the FACE_IDENTITY composite image (`image_url`) as input to minimax. The video appears on the idea card and on the packs page as soon as it completes — users can proceed to schedule/publish with the image immediately without waiting.
-
-### Provenance — tracking cost and duration
-
-Every video job writes two rows to `video_gen_provenance`:
-
-1. **submit** (`execute-video`): `status=submitted`, `submitted_at`, `muapi_request_id`
-2. **complete** (`muapi-webhook` or polling fallback): `status=completed|failed`, `completed_at`, `duration_ms`, `provider_cost_usd`
-
-**Check recent video jobs:**
-```sql
-SELECT idea_id, tier, model, status,
-       duration_ms, provider_cost_usd,
-       submitted_at, completed_at
-FROM video_gen_provenance
-ORDER BY submitted_at DESC
-LIMIT 20;
-```
-
-**Check real-world average durations (used to calibrate polling thresholds):**
-```sql
-SELECT model, tier, sample_count, avg_ms, p50_ms, p90_ms, avg_cost_usd
-FROM v_video_avg_duration;
-```
-
-Once `sample_count >= 3` per model, the client automatically uses real p50 values instead of hardcoded defaults (90s minimax, 55s seedance, 110s veo3.1-lite). No deployment needed — values are fetched from `/api/video/stats` at page load.
-
-**Check cost vs expected:**
-```sql
-SELECT model, tier,
-       ROUND(AVG(provider_cost_usd)::numeric, 4) AS avg_billed,
-       COUNT(*) AS count
-FROM video_gen_provenance
-WHERE status = 'completed'
-  AND submitted_at > now() - interval '7 days'
-GROUP BY model, tier;
-```
-
-MuAPI has raised video prices without notice (D014: seedance $0.06→$0.10, veo3.1-lite $0.30→$0.39). This query shows if billing has drifted from the `operation_pricing` credit costs. The daily pricing-watcher cron will surface these as `pricing_alerts`.
-
-### Diagnosing stuck videos
-
-A stuck video has `video_status = 'processing'` or `'pending'` longer than expected.
-
-**Find stale jobs:**
-```sql
-SELECT gi.id, gi.video_status, gi.video_request_id,
-       gi.video_submitted_at,
-       ROUND(EXTRACT(EPOCH FROM (now() - gi.video_submitted_at)) / 60) AS elapsed_min,
-       vp.model, vp.tier
-FROM generated_ideas gi
-LEFT JOIN video_gen_provenance vp ON vp.idea_id = gi.id
-WHERE gi.video_status IN ('processing', 'pending')
-  AND gi.video_submitted_at < now() - interval '10 minutes'
-ORDER BY gi.video_submitted_at ASC;
-```
-
-**Recover a stuck job manually** (hit the polling endpoint — it will call MuAPI and update DB if complete):
-```bash
-curl -H "Authorization: Bearer <user_access_token>" \
-  https://autonomous.postglider.com/api/video/status/<idea_id>
-```
-
-**Mark a stuck job as failed** (frees the user to retry):
-```sql
-UPDATE generated_ideas
-SET video_status = 'failed'
-WHERE id = '<idea_id>'
-  AND video_status IN ('processing', 'pending');
-```
-
-### MuAPI webhook troubleshooting
-
-If a user reports their reel never arrived, check:
-
-```sql
--- Did the webhook fire?
-SELECT id, video_status, video_url, video_submitted_at, video_request_id
-FROM generated_ideas
-WHERE id = '<idea_id>';
-
--- Did provenance record a completion?
-SELECT status, duration_ms, provider_cost_usd, completed_at, error_message
-FROM video_gen_provenance
-WHERE idea_id = '<idea_id>';
-```
-
-If `video_gen_provenance.status = 'submitted'` but `generated_ideas.video_status = 'processing'` and > 10 minutes have elapsed — the webhook missed. Hit `/api/video/status/<idea_id>` with the user's token to recover, or manually fetch from MuAPI and update the DB.
+PostGlider previously offered an in-app "Make Reel" video-generation feature, routed entirely
+through MuAPI (a third-party aggregator vendor). It was removed entirely — code, DB tables/columns
+(`video_gen_provenance`, `generated_ideas.video_*`), the live Cloud Run env var, and the Supabase
+Edge Function secret. Reasons: reliability concerns with MuAPI specifically (unreliable webhooks,
+undocumented price increases), the feature had near-zero real usage (it was beta/admin-gated,
+never exposed to regular customers), and no vendor currently meets the app's quality bar for video
+generation. See `decisions.md` D-2026-07-31k. If video generation is revisited later, it needs a
+new vendor evaluation (Runware was being benchmarked as of this writing) — this is new work, not a
+revival of the MuAPI integration.
 
 ---
 
@@ -549,17 +430,19 @@ PostGlider runs a daily cron that compares current routing costs against market 
 | Component | Path | Purpose |
 |---|---|---|
 | **Migration** | `supabase/migrations/20260604001000_provider_pricing.sql` | `provider_pricing` table (daily snapshots) + `pricing_alerts` table (routing suggestions) |
-| **Cron endpoint** | `app/api/cron/pricing-watcher/route.ts` | Runs daily at 07:00 UTC. Fetches MuAPI live catalog, compares against reference prices, writes snapshots + alerts. |
+| **Cron endpoint** | `app/api/cron/pricing-watcher/route.ts` | Runs daily at 07:00 UTC. Compares hardcoded reference prices against current routing, writes snapshots + alerts. |
 | **Manual script** | `scripts/pricing-watcher.cjs` | Same logic, runs locally. Dry-run by default. `--write` persists to Supabase. |
 | **vercel.json** | `vercel.json` | Cron registered at `0 7 * * *` (daily, runs after `refresh-route-pricing` at 06:00) |
 
 ### How the watcher works
 
-1. Fetches live MuAPI catalog (`GET api.muapi.ai/api/v1/models`) — detects if MuAPI raises prices on models we use
-2. Merges live prices over hardcoded reference prices (Google AI direct, OpenAI direct, Replicate)
-3. For each active route, looks up known quality-validated alternatives
-4. Raises a `pricing_alerts` entry when savings exceed **15%** (below that, migration cost exceeds benefit at current volume)
-5. Quality-constrained routes (`FACE_IDENTITY`, `PERSON_FOREGROUND`) are skipped — no tested alternative exists (D008)
+No live-catalog fetch runs anymore — MuAPI, the one provider with a live pricing API, was removed
+entirely 2026-07-31 (see above). All prices are the hardcoded `REFERENCE_PRICES` table, updated by
+hand when a provider's official docs change.
+
+1. For each active route, looks up known quality-validated alternatives against the reference table
+2. Raises a `pricing_alerts` entry when savings exceed **15%** (below that, migration cost exceeds benefit at current volume)
+3. Quality-constrained routes (`FACE_IDENTITY`, `PERSON_FOREGROUND`) are skipped — no tested alternative exists (D008)
 
 ### Current alerts the watcher will raise
 
@@ -634,8 +517,11 @@ The watcher's reference prices are hardcoded in two places that must stay in syn
 
 Update both when:
 - A provider announces a price change
-- A new route is added to `IMAGE_ROUTING` or `VIDEO_ROUTING`
+- A new route is added to `IMAGE_ROUTING`
 - A benchmark closes an open quality constraint (e.g., a tested FACE_IDENTITY alternative)
+
+MuAPI (the only provider with a live pricing-catalog API) was removed entirely 2026-07-31 — the
+watcher no longer fetches any live catalog, it compares only against the hardcoded reference table.
 
 ### Model Monitor Agent (pg-admin) — quality/Elo drift, separate from pricing
 
@@ -648,9 +534,8 @@ Artificial Analysis quality/Elo leaderboard, producing a Gemini-synthesized reco
 in `public.model_monitor_runs`. Report-only — it never changes routing itself, same as
 `pricing_alerts`.
 
-It deliberately does **not** duplicate pricing-watcher's MuAPI-catalog fetch — the two agents are
-complementary, not competing: pricing-watcher owns cost drift, Model Monitor Agent owns quality
-drift. Query recent runs:
+The two agents are complementary, not competing: pricing-watcher owns cost drift, Model Monitor
+Agent owns quality drift. Query recent runs:
 
 ```sql
 SELECT created_at, summary, models_reviewed, recommendations_count, raw_report
