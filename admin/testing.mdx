@@ -2,8 +2,28 @@
 title: "Automated Testing"
 description: "Full test suite documentation: all scripts, shared utilities, accounts, what they test, and chain reasoning."
 visibility: internal
-verified_against_commit: 0c7bb31
+verified_against_commit: 9f3af5cd
 ---
+
+<Callout kind="info">
+  **Refreshed 2026-08-07** against current `postglider-auto` `main` (979 commits ahead of the
+  previous `verified_against_commit: 0c7bb31`). This pass cross-checked every script this doc
+  names against what's actually on disk today, added scripts that didn't exist yet at the last
+  verification, and corrected sections that had drifted from the real file content (see inline
+  notes below, especially **`app-04-mobile`**, which was fully rewritten and no longer does
+  pixel-diff visual regression). It also adds the `tests/e2e-integrated/` suite, which post-dates
+  the last verification entirely and is now the most current, most rigorous test in the repo.
+  Some deep-dive sections for scripts added since 0c7bb31 (`app-07`, `app-10/11`, `app-13/14/16`,
+  `app-18/19/20`, `onboard-05` through `onboard-13`, `social-04`, `billing-02`) are intentionally
+  summarized in the tables rather than given full narrative write-ups, to keep this refresh
+  scoped — flag to Ken if full deep-dives on those are wanted next.
+
+  **Same-day follow-up:** `chaos-onboarding-walkthrough.cjs` and `chaos-fuzzer.cjs` added (see
+  Root-Level Admin & Verification Scripts below) — the former now runs **automatically every day**
+  via `.github/workflows/daily-chaos-regression.yml`, the first scheduled, unattended regression
+  check in this repo. Every future test script must be added to this inventory as part of being
+  considered done — see `postglider-auto/CLAUDE.md`'s Definition of Done.
+</Callout>
 
 ## Overview
 
@@ -32,28 +52,57 @@ node scripts/run-all.cjs social       # only the social-publishing tests
 
 | Script | Account | What it tests |
 |---|---|---|
-| `onboard-01-staytrue` | `test+staytruetattoopa@gmail.com` (fake) | `/start` flow — StayTrue Tattoo PA: enrichment, GMB check, business form, generate, claim |
-| `onboard-02-colono` | `test+colonoconstruccion@gmail.com` (fake) | Same flow + direct enrichment API call first; audits every field by name |
-| `onboard-03-roccos` | `test+roccospizza@gmail.com` (fake) | Same flow as colono — Rocco's Pizza Collegeville PA (restaurant type) |
-| `onboard-04-trial` | `test+trialuser@gmail.com` (fake) | 7-day reverse trial lifecycle: signup, trial gate, upgrade prompt, post-upgrade access |
-| `app-01-ux` | `kenlyle+2@gmail.com` (real, landscaper) | 23 functional assertions: login, sidebar, page nav, feature checks, overflow, sign out |
-| `app-02-usage` | `kenlyle+2@gmail.com` (real) | Broader authenticated flow: dashboard, generate, gallery, profiles, settings, billing |
-| `app-03-vault` | `kenlyle+2@gmail.com` (real, ~8 images) | 22 sub-tests across the full Vault UI: filters, hover actions, search, dialog, tools page |
-| `app-04-mobile` | `kenlyle+2@gmail.com` (real) | Screenshots + pixel-diff regression of every main route at iPhone 390×844 |
-| `app-05-pricing-routing` | Anonymous | Routing redirects, login CTAs, free-trial landing, dynamic pricing webhook, IdeaCard field removal |
-| `app-06-network-resilience` | `kenlyle+2@gmail.com` (real) | Offline gap, reconnect, warning toast, duplicate generation prevention |
-| `app-08-billing-coverage` | `kenlyle+2@gmail.com` (real, admin) | Pricing public access, Pro Plus removal, Pro SKU display (PG-PRO-N), billing events tab visibility, extra posts pill, variable SKU webhook DB write |
-| `app-09-purchase-funnel` | `kenlyle+2@gmail.com` (real) / anonymous | `/sign-up` email capture form, known/unknown email routing, `POST /api/auth/pre-checkout` API contract, `/login?next=` redirect |
-| `app-12-butler-e2e` | `kenlyle+2@gmail.com` (real, landscaper, Pro tier) | 8-phase Butler backlog flow: seed ideas → score via `/api/butler/run` → banner visible in Pilot mode → open ButlerReviewSheet → swipe right (approve, DB asserted) → verify `butler_reasoning` → swipe left (skip, `butler_skip_count` + `butler_skip_until` DB asserted) |
-| `app-15-gmb-connect` | `kenlyle+2@gmail.com` (real) | Infrastructure checks for Google Business Profile OAuth connect flow: 401 when unauthenticated, valid Google OAuth URL returned authenticated, callback error paths redirect correctly, social settings page renders GMB row, Connect button initiates OAuth navigation |
-| `e2e-generate` | `kenlyle+2@gmail.com` (real, 2-profile) | Full week-pack generation E2E for all modes (pilot/passenger) × routes (trivial/mixed/edge/story/vault/edit-from-pack); profile auto-selection, Architect scan, TinderReview, pack assembly, PostforMe calendar verification |
-| `app-17-autonomous-e2e` | `app-17-{timestamp}@nowhere.invalid` (temp) | Full autonomous pipeline E2E: free trial → onboard → claim → enable autonomous → trigger orchestrator API → poll batch completion → verify generated_ideas + week_pack → render pack page in browser. Self-cleaning. `--dry-run` skips orchestrator call. |
-| `e2e-partial-week` | `kenlyle+2@gmail.com` (real) | Partial first-week onboarding: asserts Architect plan and pack item count ≤ days remaining in the current `week_starts_on`-aligned week; self-adjusts expected count by running day |
-| `social-01-fb-publish` | `kenlyle+2@gmail.com` (real) | End-to-end Facebook publish: generate idea, save, select page, publish, verify success badge |
-| `social-02-api-contract` | `kenlyle+2@gmail.com` (real) | Headless `fetch`-only contract tests for social publish endpoints: 401, 405, 422, response shape |
-| `social-03-token-health` | `kenlyle+2@gmail.com` (real) | Supabase-admin audit of OAuth token health: refresh_token presence, expiry windows, schema compatibility |
-| `billing-01-woo-webhook` | none (API-only) | WooCommerce webhook auth + contract: valid/invalid signature, SKU upgrade paths, `billing_events` DB write |
-| `postforme-audit` | none (env: `POSTFORME_API_KEY`) | Lists all PostForMe social accounts with `id`, `platform`, `status`, `external_id`, and `username` — diagnostic utility for verifying account sync state and connection health |
+| `onboard-01-staytrue` | `test+staytruetattoopa@gmail.com` (fake) | `/start`/`/onboarding` flow — StayTrue Tattoo PA: enrichment, GMB check, business form, real photo upload, generate, claim, `/generate` smoke check. Prod-capable by default (`resolveBase()`), `--dev` for localhost. |
+| `onboard-02-colono` | `test+colonoconstruccion@gmail.com` (fake) | Same flow + direct enrichment API call first; audits every field by name. Prod-capable by default. |
+| `onboard-03-roccos` | `test+roccospizza@gmail.com` (fake) | Same flow as colono — Rocco's Pizza Collegeville PA (restaurant type). Prod-capable by default. |
+| `onboard-04-trial` | `test+trial-<timestamp>@postglider.com` (fake) | 7-day reverse trial lifecycle via API/DB only (no browser): claim → `tier=pro`+`trial_ends_at`, then backdates `trial_ends_at` and runs the real `pg_cron` downgrade SQL, asserts flip back to `tier=free`. **Hardcoded to `localhost:3000`** — local-only despite the naming convention. |
+| `onboard-05-manual-l22` | synthetic "L22 Test Tattoo Co." | API/DB test of the manual (no-website) onboarding body path — asserts `business_profiles.onboarding_source='manual'` and non-empty classification codes. Local-only (`localhost:3000`). |
+| `onboard-06-skipforward-l22` | synthetic "Skipforward Test Co." | Regression for the `{existingProfileId}` skip-forward fix — posting just an existing profile ID completes via that row instead of duplicating it. Local-only. |
+| `onboard-07-rejected-posts-nudger-l23` | synthetic "L23 Nudger Test Co" | Rejected Posts Nudger prefetch route: 3-strike `butler_skip_count` detection, LLM summary fires once then doesn't re-fire on a stale call. Notes downstream quota/prompt-injection wiring is typecheck-only, not exercised live. Local-only. |
+| `onboard-08-service-intelligence-l12` | synthetic "L12 Test Tattoo Co." | Confirms onboarding-seeded services get `business_services.intelligence` auto-populated by the fire-and-forget background call (polls up to 30s). Local-only. |
+| `onboard-09-competitor-bridge-l17` | synthetic profile + `TEST_USER_ID` | Confirms manually-curated `public.competitors` rows bridge into `autonomous.competitor_accounts` via the real discovery RPC. Self-documents a known teardown gap (FK-blocked cleanup). Local-only. |
+| `onboard-10-seasonal-schedule-l18` | 2 synthetic profiles | Confirms the live `/api/packs/create-from-ideas` route (not just the pure scheduling function) actually prioritizes Promote for a service in its seasonal peak month. Local-only. |
+| `onboard-11-virality-signals-l19` | synthetic "L19 Virality Test Co." | Direct RPC round-trip test of Virality Agent signal persistence (`autonomous_insert_virality_signal`/`autonomous_get_recent_virality_signals`), including a real time-window filter check. No dev server needed at all. |
+| `onboard-12-equipment-context-refresh-l15` | synthetic "L15 Equipment Test Co." | Confirms `/api/generate-equipment-context` re-derives equipment from the *current* services list, not a frozen snapshot. Local-only. |
+| `onboard-13-content-calendar-seeder-l21` | synthetic "L21 Seeder Test Co." | Calls the real `selectFirstWeekAngles()` (via a spawned `tsx` child process, not HTTP) and asserts the 2 Promote / 3 Provide / 2 Personalize 3Ps quota is met from a 9-angle candidate pool. |
+| `app-01-ux` | `kenlyle+2@gmail.com` (real, landscaper) | Auth + navigation regression: login branding, sidebar links, gallery search, mobile overflow, sign-out. Flips `is_pilot_mode_active` via Supabase REST for pilot/passenger mode testing. |
+| `app-02-usage` | `kenlyle+2@gmail.com` (real) | Shallow smoke test across Dashboard/Generate/Gallery/Profiles/Settings/Billing — mostly "does the heading render," not deep per-feature verification. |
+| `app-03-vault` | `kenlyle+2@gmail.com` (real, ~8 images) | Media Vault regression: filters, hover actions, search, detail dialog, a real archive→unarchive round trip verified against filtered views. |
+| `app-04-mobile` | `kenlyle+2@gmail.com` (real) | **Rewritten since the last verification — no longer does pixel-diff visual regression.** Now a mobile (390×844) page smoke + coarse horizontal-overflow check (`document.body.scrollWidth`) across public and authenticated pages, plus a Pilot-vs-Passenger "Save to Library" visibility check. See the corrected write-up below. |
+| `app-05-pricing-routing` | Anonymous (+ mode-aware generate check) | Routing/redirect correctness, login CTA links, `/pre-checkout` content, `woo-sync` webhook contract-only check (no live credentials asserted). |
+| `app-06-network-resilience` | `kenlyle+2@gmail.com` (real) | Real generation → forced 15s offline → reconnect → responsiveness check. Duplicate-generation-prevention check is soft (logs a note, doesn't fail, if no warning appears). |
+| `app-07-mobile-layout` | `kenlyle+2@gmail.com` (real) | The rigorous version of the mobile overflow check — scans every DOM element for right-edge viewport bleed (not just `body.scrollWidth`), reports offending elements/classes, across more pages than app-04 (including the Generate "Creative Direction" panel and `/profiles/new`). |
+| `app-08-billing-coverage` | `kenlyle+2@gmail.com` (real, admin) | Pricing public access, Pro Plus removal, Pro SKU display (PG-PRO-N), billing events tab visibility, extra posts pill (weak — accepts either outcome for admin), variable SKU webhook DB write. |
+| `app-09-purchase-funnel` | `kenlyle+2@gmail.com` (real) / anonymous | `/sign-up` email capture form, known/unknown email routing, `POST /api/auth/pre-checkout` API contract, `/login?next=` redirect, live `/api/auth/claim` + WooCommerce mirror check. |
+| `app-10-usage-credits` | `kenlyle+2@gmail.com` (real, pre-seeded 3-cycle credit history required) | Credit Usage card mechanics: current-cycle progress bar, prior-cycle expand/collapse, `GET /api/usage/credits` shape. **Hardcoded local Chromium binary path** — fragile if the Playwright cache version changes. |
+| `app-11-credit-statement` | `kenlyle+2@gmail.com` (real, same seeded data as app-10) | Content-fidelity companion to app-10: raw DB operation keys never leak into the UI, friendly labels appear, signed credit amounts, human-formatted prior-cycle dates, transaction drill-down. Same hardcoded-Chromium-path fragility as app-10. |
+| `app-12-butler-e2e` | `kenlyle+2@gmail.com` (real, landscaper, Pro tier) | 8-phase Butler backlog flow: seed ideas → score via `/api/butler/run` → banner visible in Pilot mode → open ButlerReviewSheet → swipe right (approve, DB asserted) → verify `butler_reasoning` → swipe left (skip, `butler_skip_count` + `butler_skip_until` DB asserted). Password is hardcoded in the file rather than pulled from `.env.local` like every other script. |
+| `app-13-video-reel` | `kenlyle+2@gmail.com` (real) | Real Make-Reel-to-Facebook pipeline via direct API calls (bypasses the Turnstile-blocked video UI): generate video → poll for `video_status='completed'` → publish to Facebook via PostforMe → real post ID returned. Live-cost test; depends on a specific hardcoded idea ID that may already have a completed video from a prior run, silently skipping re-generation. |
+| `app-14-onboarding-usertour` | fresh disposable email each run | Full free-trial → onboarding → claim → UserTour SDK check (`window.usertour.isIdentified()`), plus a live UserTour REST API trait check if creds are set. The one script that explicitly documents defaulting to **production** so recorded runs don't need "this is just my machine" caveats. |
+| `app-15-gmb-connect` | `kenlyle+2@gmail.com` (real) | Infrastructure checks for Google Business Profile OAuth connect flow: 401 when unauthenticated, valid Google OAuth URL returned authenticated, callback error paths redirect correctly, social settings page renders GMB row, Connect button initiates OAuth navigation. Does not test a completed OAuth exchange. |
+| `app-16-guided-tour` | `kenlyle+2@gmail.com` (real) | AI "Get help" guided-tour widget: 401 unauthenticated, popover opens, real live-LLM question produces a real spotlight tour overlay with working Next/Done navigation — exercised 3 times with different real questions. |
+| `app-17-autonomous-e2e` | `kenlyle+N@gmail.com` (temp) | The single most comprehensive test in the repo: free-trial signup → onboarding → claim → enable autonomous → real competitor discovery → real orchestrator run (~$0.05/run in Gemini tokens) → poll `batch_generation_jobs` → verify `generated_ideas`/`week_packs` → render the real pack page → verify Batch Rationale reflects real upstream signals (several checks are soft/logged-warning rather than hard-failing). Hardcoded to **production**, self-cleaning. `--dry-run` skips the costly orchestrator call. |
+| `app-18-calendar-day-zoom` | `kenlyle+2@gmail.com` (real) | **Has zero assertions.** Opens the calendar, clicks a day cell, and only `console.log`s/screenshots the result for a human to read — cannot fail. Looks like a leftover diagnostic script, not a maintained regression test. |
+| `app-19-calendar-popup-close` | `kenlyle+2@gmail.com` (real) | Real regression: the calendar event popover's close button must stay in-viewport on a short mobile screen. Falls back to a static HTML fixture if the account has no scheduled posts — a pass in that case reflects only the fixture, not real data. |
+| `app-20-new-composite-routes` | `kenlyle+2@gmail.com` (real, 2 hardcoded profiles) | Live-cost coverage of two previously-untested routing paths: WORKSPACE_REMIX (via the real Passenger `/generate` flow) and MULTI_IMAGE_COMPOSITE ("AI Assisted"), each checked for correct `routing_key`, correct model tier, and an AI-judged coherence pass on the real generated image. **Headed by default** ("Ken wants to watch these run") — pass `--headless` to opt out. |
+| `e2e-generate` | `kenlyle+2@gmail.com` (real, 2-profile) | Full week-pack generation E2E for all modes (pilot/passenger) × routes (trivial/mixed/edge/story/vault/edit-from-pack); profile auto-selection, Architect scan, TinderReview, pack assembly, PostforMe calendar verification. Prod-by-default, headed-by-default, publishes by default. |
+| `e2e-partial-week` | `kenlyle+2@gmail.com` (real) | Partial first-week onboarding: asserts Architect plan and pack item count ≤ days remaining in the current `week_starts_on`-aligned week; self-adjusts expected count by running day. |
+| `run-all` | n/a (orchestrator) | Master runner — sequentially executes the named `.cjs` test scripts, streams live output, rolls up pass/fail. Has no assertions of its own; only as good as the scripts it calls. |
+| `run-regression-suite` | n/a (orchestrator) | Master runner for the `onboard-05` through `onboard-13` / orchestrator / pack-assembly batch of verification scripts, with a rolled-up pass/fail summary. |
+| `prod-01-generate-flow` | production account | Production-only Playwright smoke suite with real `assert()` calls — deliberately targets prod because Turnstile and live image-gen can't be exercised on localhost. |
+| `verify-l18-seasonal-optimizer` | n/a | Unit-level real-assertion test of the pure `optimizePublishTimes()` scheduling function (complements `onboard-10`'s live-route test of the same feature). |
+| `verify-l20-readiness-queries` | seeded live profile | Real assertions verifying the exact Supabase queries the dashboard readiness checklist depends on. |
+| `verify-l36-phase-ab-live` | live `business_profiles` rows | Live onboarding-pipeline test, 2 cases, explicit ok/fail assertions, includes cleanup. |
+| `verify-l36-phase-c-trial-live` | anonymous trial funnel | Playwright-driven anonymous trial funnel test with assertions at every step plus a login-redirect regression check. |
+| `niche-intelligence-01-goth-tattoo` | real generated content | Acceptance test with a defined, code-checked acceptance bar (vocabulary hit-count, word-count limits) against real AI-generated content — not an LLM's subjective opinion. |
+| `test-text-legibility-fallback-202607` | n/a (unit, direct import) | 4 explicit assertions calling the actual production `detectImageDefect`/`resolveDefectFallback` functions directly (imported, not reimplemented). |
+| `social-01-fb-publish` | `kenlyle+2@gmail.com` (real) | End-to-end Facebook publish: generate idea, save, select page, publish, verify success badge. Most of Suite 3 silently skips if Facebook isn't connected, and the AI-generation step can silently no-op in headless mode ("Turnstile not bypassed"), which cascades to skipping save/publish too. |
+| `social-02-api-contract` | `kenlyle+2@gmail.com` (real) | Headless `fetch`-only contract tests for social publish endpoints: 401, 405, 422, response shape. Status-code/shape validation only, not business-logic verification. |
+| `social-03-token-health` | `kenlyle+2@gmail.com` (real) | Supabase-admin audit of OAuth token health: refresh_token presence, expiry windows, schema compatibility. Silently skips a platform entirely if the account has zero connections for it. |
+| `social-04-multi-publish` | `kenlyle+2@gmail.com` (real, needs FB+IG both connected) | Four suites: API shape check (both channels), UI connected-status check, real pack schedule-drawer multi-channel selection, and (unless `--skip-schedule`) a real live schedule-then-delete round trip against actual PostforMe/calendar state — the most functionally meaningful of the four social scripts, but gated on a pre-existing "ready" pack existing. |
+| `billing-01-woo-webhook` | `kenlyle+2@gmail.com` (real, state-mutating) | WooCommerce/Bit-Integrations webhook auth + contract against the live deployed function: 401/405 checks always run; the functional cancel/idempotency/unknown-customer checks only run if `WOO_WEBHOOK_SECRET` is set locally. |
+| `billing-02-charge-atomic` | `kenlyle+2@gmail.com` (real, state-mutating, restored after) | Direct RPC regression test of `charge_credits_atomic` against two named historical bugs: sequential-charge accumulation and stale-cycle rollover, plus a live pricing-formula check and an idempotency-key check. Real functional coverage of real billing logic, not a shape check. |
+| `postforme-audit` | none (env: `POSTFORME_API_KEY`) | Lists all PostForMe social accounts with `id`, `platform`, `status`, `external_id`, and `username` — diagnostic utility for verifying account sync state and connection health. Read-only, no assertions. |
 
 **Self-cleaning:** all three `onboard-*` scripts delete the test user from `auth.users` at the end of every run via the admin API (try/finally, so cleanup runs even on failure). Requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`; skips gracefully if absent.
 
@@ -228,6 +277,62 @@ aren't persisted anywhere else; testimonials and the schedule reasoning are re-f
 1. `social-01-fb-publish` is the slow, expensive E2E (~90s): real browser, real generation, real API call to Facebook.
 2. `social-02-api-contract` is the fast, cheap validation (~5s): headless `fetch` calls that verify status codes and response shapes. If someone changes the error response from `{ error: string }` to `{ message: string }`, this catches it in milliseconds.
 3. `social-03-token-health` is the proactive monitor: it queries `social_connections` via Supabase admin to warn if any OAuth token expires within 7 days.
+
+---
+
+## Purchase-to-Production Integrated Test Suite (`tests/e2e-integrated/`)
+
+**Added since the last verification (this doc previously had no record of this suite at all).** This is the newest, most rigorous test in the repo — a real, live, 5-phase purchase-to-production chain that replicates what an actual paying customer experiences, built per `.dwp/plans/2026-07-15-e2e-integrated-test-suite.md`.
+
+```bash
+npx tsx tests/e2e-integrated/run-all.ts [--skip-uilicious] [--skip-content-gen]
+```
+
+`run-all.ts` runs all 5 phases sequentially, aggregates PASS/FAIL, and produces a PDF report via `scripts/_shared/make-pdf-report.cjs`. `--skip-uilicious` skips Phase 3's Uilicious half (costs real Uilicious cloud minutes); `--skip-content-gen` skips Phase 4 (hits real Gemini/OpenAI — real cost).
+
+| Phase | What it does |
+|---|---|
+| **1 — Order placement** (`phase1-order-placement.ts`) | Browser-driven "Place Order" was confirmed unachievable (`decisions.md` D-2026-07-15e/f/g), so this replicates a real PG-PRO-3 purchase's downstream effects via WP-CLI instead: creates a real WordPress user, `wp wc shop_order create`s a real order, then `wp pg-e2e process_order` fires the same `woocommerce_checkout_order_processed`/subscription-activation events a real checkout does — triggering the real Bit Integrations webhook that provisions the Supabase profile. |
+| **2 — DB state verification** (`phase2-db-verification.ts`) | Queries the real Supabase profile Phase 1 provisioned and asserts tier/profile-cap/posts-remaining against the **real enforcement-twin functions** (`resolveMonthlyLimit`, `creditsToPosts` — imported directly from `lib/billing/limits.ts` and `lib/utils/credits.ts`, not reimplemented), so the test can never drift from the actual billing math. |
+| **3a — UI truth (Playwright)** (`phase3-posts-math.ts`) | Logs in via magic link (never logs the token), screenshots `/billing`, and compares the displayed "N posts left" against Phase 2's computed value (±1 tolerance for rounding). |
+| **3b — UI truth (Uilicious)** (`phase3-uilicious.ts`) | Runs the real Uilicious cloud "PostGlider" project's `Billing And Profiles.test.js` against a live magic-link session — verifies tier label, profile creation up to the 3-profile cap, and that a 4th attempt is correctly blocked. |
+| **4 — Content generation quality** (`phase4-content-generation.ts`) | Extends `scripts/e2e-generate.cjs` (via its `--profile-id`/`--profile-name` flags) rather than reimplementing generation, and verifies `usage_monthly` increased and `/billing`'s displayed posts-remaining decreased by the matching amount. |
+| **5 — Subscription lifecycle** (`phase5-subscription-lifecycle.ts`) | Simulates the real WPSubscription/Bit Integrations webhook payload shape (captured live during this suite's own development, not guessed) directly against `app/api/wpsubscription-webhook` — cancelled → re-verify DB → active (reactivate) → re-verify DB. Tests the webhook receiver in isolation, distinct from Phase 1's real WordPress-side trigger. |
+
+**Test data convention:** disposable `kenlyle+NN@gmail.com` addresses, allocated sequentially via `lib/emailSequence.ts`. Default: no cleanup — test-user history is left for audit.
+
+**Uilicious fixture files** (`tests/e2e-integrated/uilicious/*.test.js`) also include standalone navigation/mobile-overflow/login-flow smoke tests (`Navigate to Billing`, `Sidebar Navigation Mobile`, `Mobile Layout — No Horizontal Overflow`, `Gallery Search Mobile`, `Login Flow`, etc.) that can be run independently via the Uilicious cloud project, plus `Checkout - Pro Subscription.test.js` — a real live WooCommerce/Stripe checkout against `postglider.com` using a disposable Wise card and a `$0.50`-net coupon (same expired-coupon caveat as `live-checkout-dry-run.cjs` below — check the coupon is still valid before relying on this one). One file, `Sign Out.test.js`, is a **leftover Uilicious template** (still references `github.com/login` / `johndoe` placeholder credentials) — it is not a real test and should not be trusted as sign-out coverage.
+
+A real run of this suite has previously completed successfully end-to-end (see `tests/e2e-integrated/.runs/99e61ecd-...json` — a passed run for `kenlyle+72@gmail.com`, tier `pro`, 3 profiles allowed), confirming this isn't just a plan on paper.
+
+---
+
+## Root-Level Admin & Verification Scripts (`postglider-auto/` repo root)
+
+These live directly at the repo root (not in `scripts/`), and split into two kinds: reusable QA/admin tools (drive real UI or real functions, no fabricated data) and point-in-time regression checks written to confirm a specific shipped fix still holds.
+
+| Script | What it does | Invocation | Account |
+|---|---|---|---|
+| `chaos-onboarding-walkthrough.cjs` | Structured critical-path regression, built 2026-08-07 after the PO pushed for manual click-testing: verifies every dashboard onboarding-checklist link actually navigates somewhere real, then does semi-random careless things to a real profile (max out the Owner Appearance % slider by mouse AND by keyboard-only, delete+re-add a classification code, confirm a known duplicate-worker data gap) — all destructive steps snapshot/restore, safe to run against production repeatedly. Found and led to fixing 3 real bugs same-day (keyboard-only slider commit, exact-code search, Denys/Denis duplicate). Runs **daily and unattended** via `.github/workflows/daily-chaos-regression.yml`. | `node chaos-onboarding-walkthrough.cjs [--prod] [--headless]` | `kenlyle+2@gmail.com` (magic link) |
+| `chaos-fuzzer.cjs` | Right-sized randomized fuzzer, Phase 2 of the same effort — a weighted random pool of ~14 action types (navigation chaos, tab-switching, garbage-text paste, WITP flapping, glossary add/delete, role-cycle spam, Niche DNA search, owner-% slider abuse, and real calendar drag-and-drop) repeated to a configurable action count. Hard exclusion list (never clicks Delete Account/Sign out/Disconnect/Connect-OAuth/Publish/Checkout), bounded occurrence counts on anything that mutates real data, and a DB-verified restore check specifically for calendar drags (fails loudly on any mismatch, since that's a real customer's real schedule). Draws its action pool from `docs/CHAOS-ACTION-CATALOG.md`'s 365 code-grounded candidates. Not yet run at full scale (~300 actions) as of this writing — verified clean at 20 and 30 actions. | `node chaos-fuzzer.cjs [--actions 300] [--prod] [--headless]` | `kenlyle+2@gmail.com` (magic link) |
+| `admin-reset-usage.cjs` | Reusable admin tool — drives the real `/admin` Admin Actions UI (not a raw DB write) to zero a user's usage counters. See full write-up above. | `node admin-reset-usage.cjs <target-email> [admin-email] [--dev]` | `kenlyle@gmail.com` (magic link) |
+| `view-as-mike.cjs` | Reusable QA tool — opens a persistent, real, headed browser logged in as the real customer account for manual inspection of any page/pack. No assertions of its own. | `node view-as-mike.cjs [path-or-full-url]` | `notmichaelbrown@gmail.com` (magic link), prod only |
+| `view-pack-as-user.cjs` | Read-only diagnostic — loads a page as any target user via magic link to reproduce exactly what their RLS-scoped session sees; built for a specific "pack no longer exists" bug. Includes an automated `notFound`-regex check. `--click-generate` calls a real mutating endpoint. | `node view-pack-as-user.cjs <target-email> <path> [--dev] [--click-generate] [--pdf] [--headed]` | any target user (magic link, read-only by default) |
+| `test-single-post.cjs` | The cheapest real-pipeline spot-check — one manual post box end-to-end (profile → batch size 1 → WITP pick → category/item chip → text → AI Image → Save → Create My Batch → Approve → wait for generation). See full write-up above. | `node test-single-post.cjs [--email] [--profile] [--witp] [--category] [--item] [--text] [--headless] [--dev] [--max-wait]` | `notmichaelbrown@gmail.com` default, prod by default |
+| `review-profile-settings.cjs` | Read-only data-completeness audit against live Supabase tables (`business_profiles`, `glossary_terms`, `business_services`, `brand_assets`, `worker_specialties`, `niches`, `postforme_connections`) — PASS/WARN/FAIL report mirroring a human Settings-page review. No fix endpoint called. | `node review-profile-settings.cjs --profile-id <uuid>` | any profile ID, prod DB |
+| `live-checkout-dry-run.cjs` | Real live WooCommerce/Stripe checkout on `postglider.com`, end-to-end through Stripe card entry and order confirmation. **Its own header says "meant to be run once, not scheduled"** — depends on a coupon (`kenpro3fittycint`) that expired 2026-07-16. As of this refresh (2026-08-07) it cannot be re-run successfully without a fresh coupon. Kept in the catalog as a proven pattern, flagged as currently non-repeatable. | `node live-checkout-dry-run.cjs` | real `postglider.com` checkout, real (minimal) Stripe charge |
+| `verify-defect-detector.mjs` | Real regression check of the shipped production `detectImageDefect()` (imported, not reimplemented) against 5 fixed real images (4 known-bad, 1 known-good control). | `node --experimental-strip-types verify-defect-detector.mjs` | no browser, uses `.env.local` Gemini creds |
+| `verify-demo-mining.cjs` | Live SSE verification that the `mineWebsite()` step of the real `/api/demo/run` demo-onboarding endpoint fires without erroring. | `node verify-demo-mining.cjs [test-url] [--prod]` | `kenlyle@gmail.com` (magic link) |
+| `verify-font-lettering-post.mjs` | Live end-to-end regression: creates a real Stay True Tattoo idea, runs it through the real `executeSmartDefaultPlan()` entry point, confirms `isFontOrLetteringFocused` classification and the Claude cross-model text check both run against a real generated image. | `node verify-font-lettering-post.mjs` (TS-capable run) | no browser, real Stay True Tattoo profile |
+| `verify-imagegen-vertex.cjs` | Live check that `POST /api/generate-idea-image` reaches `ExecutionStrategy.ts` successfully on the deployed Cloud Run service — verifies the Gemini Developer API → Vertex AI migration on the real deployed environment. | `node verify-imagegen-vertex.cjs` (hardcoded idea ID) | `notmichaelbrown@gmail.com`, prod only |
+| `verify-scrapecreators-agent.mjs` | Real regression check of the promoted `runScrapeCreatorsCompetitiveIntelAgent()` module against a live competitor account, isolated from Supabase by design. | `npx tsx --env-file=.env.local verify-scrapecreators-agent.mjs` | no browser, real ScrapeCreators API |
+| `verify-text-required-fix.mjs` | Direct regression test of the real production `getVisualContext()` classifier against 3 fixed real-world post concepts (2 known prior failures, 1 control). | `npx tsx verify-text-required-fix.mjs` | no browser |
+| `verify-text-required-real-prompt.mjs` | Stronger version of the above — re-verifies against the **real** `finalPrompt` the production pipeline actually constructs (not just `post_concept` alone), correcting a documented gap (TASKS.md L39) in the earlier test. | `npx tsx verify-text-required-real-prompt.mjs` | no browser |
+| `verify-tourguide.cjs` | Real end-to-end UI check that the TourGuide help agent renders an actual spotlighted step (not an error state) for a real submitted question. | `node verify-tourguide.cjs [--headed] [--port 3001]` | `kenlyle+2@gmail.com`, local dev only |
+| `verify-vault-backfill-fix.mjs` | Live, non-mocked regression test of a specific shipped bug fix (D-2026-07-14g) — reproduces the exact scenario, calls the real `saveToVaultAction()`, verifies old object 404s and new vault URL is live via real HTTP fetch. | `npx tsx verify-vault-backfill-fix.mjs` | no browser, real Stay True Tattoo profile, leaves a labeled fixture row (no-delete policy) |
+| `verify-workspace-gate.mjs` | Real regression test of a priority-gating fix (DWP-1, 2026-07-11) — calls the real `getVisualContext()`/`resolveMediaReferences()` against two real cases and cross-checks against real `business_profile_images` rows. | `npx tsx verify-workspace-gate.mjs` | no browser, real Stay True Tattoo profile |
+
+**Not included** (one-off maintenance/migration tools, not repeatable regression tests — each says so in its own header comment): `regenerate-idea-images.cjs`, `trigger-purchase-webhook.cjs` (explicitly a temporary checkout-UI stand-in), `register-postforme-webhook.mjs`, `cleanup-test-postforme-posts.mjs`, `trigger-backfill-brand-asset-tags.cjs`.
 
 ---
 
@@ -549,35 +654,39 @@ Dedicated Media Vault regression suite. Calls `cleanupTestUserData` before launc
 
 ### app-04-mobile
 
-**Screenshots:** `/tmp/pg-shots/<page-name>.png`
-**Diff overlays:** `/tmp/pg-shots/<page-name>-diff.png`
-**Baselines:** `scripts/baselines/<page-name>.png`
-**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
-**Viewport:** 390×844 (iPhone 14 Pro, deviceScaleFactor 2)
-
-Visual regression gate — not just a spot-check. Logs in and takes a full-page screenshot of every main route, then diffs against the baseline:
-
-| Page | Route |
-|---|---|
-| dashboard | `/dashboard` |
-| generate | `/generate` |
-| gallery | `/gallery` |
-| profiles | `/profiles` |
-| social-accounts | `/dashboard/social-accounts` |
-| settings | `/settings` |
-| billing | `/billing` |
-
-**First run:** seeds baselines in `scripts/baselines/` automatically.
-**Subsequent runs:** fails if any page differs by >0.1% of pixels. Writes a red diff overlay to `/tmp/pg-shots/<page>-diff.png`.
-
-<Callout kind="tip">
-  To update baselines after an intentional UI change:
-  ```bash
-  rm scripts/baselines/*.png && node scripts/app-04-mobile.cjs
-  ```
+<Callout kind="warning">
+  **Corrected 2026-08-07.** Everything below this line previously described a pixel-diff visual
+  regression gate (baselines, `pixelmatch`/`pngjs`, diff overlays). That is no longer what this
+  script does — the file on disk is now `app-04-mobile.cjs` with an internal header naming it
+  "app-04-mobile-rewrite," and a full-repo grep confirms **no script currently imports
+  `scripts/_shared/visualRegression.cjs`** — the pixelmatch wrapper described here is orphaned,
+  not wired into anything. If a pixel-diff visual regression gate is still wanted, it needs to be
+  rebuilt and re-integrated; it does not currently exist despite this doc's prior claim.
 </Callout>
 
-**Dependencies:** `pixelmatch` and `pngjs` (devDependencies). The shared `scripts/_shared/visualRegression.cjs` wrapper handles all PNG I/O and pixelmatch configuration.
+**Screenshots:** `/tmp/pg-mobile-shots/`
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
+**Viewport:** 390×844 (iPhone 14 Pro)
+
+Mobile page smoke + a coarse horizontal-overflow check (`document.body.scrollWidth > innerWidth` — a single check per page, not the element-by-element scan `app-07-mobile-layout` does) across public pages (login, pre-checkout, forgot-password, free-trial) and authenticated pages (dashboard, generate, gallery, profiles, settings, billing, settings/social), plus a mode-specific check that Passenger's "Save to Library" button is hidden in Pilot mode, and a sidebar-open overflow check.
+
+```bash
+node scripts/app-04-mobile.cjs [--headed] [--mode pilot|passenger]
+```
+
+For the more rigorous, element-level overflow scan (reports the actual offending elements, 4px sub-pixel tolerance, more pages covered), see **`app-07-mobile-layout`** below — the two scripts are complementary, not duplicates.
+
+---
+
+### app-07-mobile-layout
+
+**Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
+
+The rigorous mobile overflow checker. Scans every DOM element for right-edge bleed past the viewport (not just `document.body.scrollWidth`), reporting the actual offending elements/classes/text, across public pages, authenticated pages (including opening the "Creative Direction" panel on Generate and the mobile sidebar), and `/pricing`/`/profiles/new`/`/settings/social`. Applies a 4px sub-pixel tolerance.
+
+```bash
+node scripts/app-07-mobile-layout.cjs [--headed] [--mode pilot|passenger]
+```
 
 ---
 
@@ -925,9 +1034,16 @@ Layer 2 tests always:
 - Skip gracefully if `SERVICE_ROLE_KEY` is absent from `.env.local`
 
 ```bash
-# To run only Layer 1 logic tests (skip the DB round-trips):
-NEXT_PUBLIC_SUPABASE_URL="" node scripts/imagegen-06-circuit-breaker.cjs
+# To run only Layer 1 logic tests (skip the DB round-trips), e.g.:
+NEXT_PUBLIC_SUPABASE_URL="" node scripts/imagegen-04-normalize.cjs
 ```
+
+<Callout kind="info">
+  The example above previously referenced `imagegen-06-circuit-breaker.cjs` — that script (and the
+  `provider_circuit` table it tested) was retired 2026-07-01 when MuAPI image generation was
+  removed (see the note further down this section). The current `imagegen-*` suite runs 01–05 and
+  07–08; there is no 06.
+</Callout>
 
 ---
 
@@ -942,6 +1058,24 @@ PASS  SYNC-GUARD: inlined rule IDs match lib/config/imageGenPolicy.ts
 ```
 
 If this test fails, it means the inlined `POLICY_RULES` array in the test script is out of sync with the production source. Update it before continuing.
+
+<Callout kind="warning">
+  **Honesty note added 2026-08-07.** The sync-guard only checks that the *rule ID list* in
+  `imagegen-02`/`imagegen-05` matches `lib/config/imageGenPolicy.ts` — it does not, and cannot,
+  check that the *evaluator function's behavior* (`evaluatePolicy`/`ruleMatches`, hand-copied
+  into both scripts per their own "mirrors lib/imagegen/policyEngine.ts" header comments) still
+  matches production. All five of `imagegen-01`, `-03`, `-04`, `-07`, `-08` are the same pattern
+  with **no sync-guard at all** — `normalizeIntent()`, `sanitizePrompt()`, `cohortGate()`,
+  `personInSceneComposite()`, `sceneRemix()`, and `compositeImages()` are all hand-copied
+  reimplementations of the real `lib/` source files, not imports. This is the exact anti-pattern
+  this repo's own `CLAUDE.md` (Working hygiene item 9) documents as having already caused one real
+  shipped bug (a hand-copied `confirmedPass()` reimplementation that inverted production's
+  pass/fail bias in a defect-detection bench). A future change to any of those six real functions
+  could silently diverge from what these unit tests check, and nothing here would catch it short
+  of a human remembering to re-copy the logic by hand. If this repo wants durable protection here,
+  the fix is the same one `CLAUDE.md` already prescribes elsewhere: export the real functions and
+  import them into the test scripts instead of copying their bodies.
+</Callout>
 
 ---
 
@@ -1148,7 +1282,13 @@ This table is updated whenever a billing, auth, or subscription change ships wit
 | `imagegen-02`/`imagegen-05` sync-guard path | `imagegen-02`, `imagegen-05` | ~~Sync-guard resolved `lib/config/imageGenPolicy.ts` relative to the `scripts/` symlink's real target (`pg-projects/`) instead of `postglider-auto/` — threw ENOENT and had been silently failing every run, so inlined rules drifted undetected: a retired two-tier `UPGRADE` stage and a stale `rule-workspace-remix` priority (550, not 750)~~ | Unknown — since whenever the `scripts/` symlink was introduced | 2026-07-03 (both files: fixed path, removed retired `UPGRADE` fixtures/rules, added `rule-item-composite` coverage) |
 | `sceneRemix`/`compositeImages` Gemini adapters | — | ~~Zero unit test coverage for either new function (D-2026-07-03c/d) — same silent-failure class `imagegen-07` already exists to catch for `personInSceneComposite`, but neither new function had a sibling test~~ | Since D-2026-07-03c/d shipped | 2026-07-03 (`imagegen-08-remix-composite` — 16 HTTP mock tests) |
 | "AI Assisted" (`MULTI_IMAGE_COMPOSITE`) live generation | — | New 2-image composite feature (D-2026-07-03d) verified only at the UI-mechanics level (picker, button enablement) — no test has confirmed a real generated image lands correctly via this path | 2026-07-03 | Open |
-| `WORKSPACE_REMIX` via `/generate` (Passenger, real account) | — | D-2026-07-03c's Gemini migration was verified live only through the onboarding trial demo route (`/api/start/generate-image`) — the main app's `/generate` → `execute-image` path for a workspace-only business has not been exercised by any automated test | 2026-07-03 | Open |
+| `WORKSPACE_REMIX` via `/generate` (Passenger, real account) | `app-20-new-composite-routes` | ~~D-2026-07-03c's Gemini migration was verified live only through the onboarding trial demo route — the main app's `/generate` path for a workspace-only business had not been exercised~~ | 2026-07-03 | Closed (`app-20` Phase 1 — real Passenger `/generate` run, routing_key + coherence asserted) |
+| `app-18-calendar-day-zoom` has zero assertions | `app-18-calendar-day-zoom` | The script only `console.log`s/screenshots the calendar day-click result — it cannot fail regardless of what actually happens. Reads as a leftover manual-diagnostic script rather than a maintained regression test. | Unknown — found during 2026-08-07 catalog refresh | Open |
+| `scripts/_shared/visualRegression.cjs` is orphaned | (none — no caller) | The pixel-diff/pixelmatch helper this doc previously credited to `app-04-mobile` is not imported by any script in the repo. `app-04-mobile` was rewritten into a plain smoke+overflow check at some point without this doc being updated to match, and no replacement visual-regression gate exists. | Unknown | Open — flagged, not fixed, during 2026-08-07 catalog refresh |
+| Hand-copied `imagegen-*` unit-test logic has no sync-guard against evaluator drift | `imagegen-01`, `-03`, `-04`, `-07`, `-08` (and the evaluator body inside `-02`/`-05`) | Six real production functions (`normalizeIntent`, `sanitizePrompt`, `cohortGate`, `policyEngine`'s evaluator, `personInSceneComposite`, `sceneRemix`, `compositeImages`) are hand-copied into these test scripts rather than imported. The existing sync-guard only checks rule *IDs*, not evaluator *behavior*. See the callout in "The sync-guard pattern" above. | Since each script was written | Open |
+| `app-08-billing-coverage` Test 5 accepts either outcome for admin | `app-08-billing-coverage` | The "Extra Posts" teal pill check logs a note but passes regardless of whether the pill is shown for the admin test account — a real regression here would not fail the suite. | Unknown | Open |
+| Soft-check ("logs a warning, doesn't fail") patterns in live E2E scripts | `app-06-network-resilience` (duplicate-gen prevention), `app-12-butler-e2e` (null `butler_reasoning`), `app-17-autonomous-e2e` (GMB Offers Agent capture, Batch Rationale signal marks) | These specific checks would not turn a CI run red even if the underlying feature silently broke — found during the 2026-08-07 catalog refresh, not previously documented. | Unknown | Open |
+| `live-checkout-dry-run.cjs` coupon expired | `live-checkout-dry-run.cjs` | The script's `kenpro3fittycint` coupon expired 2026-07-16; the script cannot complete a real checkout again without a fresh coupon. | 2026-07-16 | Open — needs a new coupon before this pattern can verify anything again |
 
 ---
 
