@@ -1023,7 +1023,7 @@ The `imagegen-*` scripts form a **test pyramid** — the base layer (01–05) te
 No dev server required. These scripts run anywhere Node.js is installed.
 
 ```bash
-node scripts/run-all.cjs imagegen          # all eight scripts in order (~5 seconds total)
+node scripts/run-all.cjs imagegen          # all seven scripts in order (~5 seconds total)
 
 # Or individually:
 node scripts/imagegen-01-sanitize.cjs
@@ -1031,19 +1031,51 @@ node scripts/imagegen-02-policy.cjs
 node scripts/imagegen-03-cohort.cjs
 node scripts/imagegen-04-normalize.cjs
 node scripts/imagegen-05-fixtures.cjs
-node scripts/imagegen-07-composite.cjs
-node scripts/imagegen-08-remix-composite.cjs
+node scripts/imagegen-07-gemini-vertex-gen.cjs
 ```
 
 | Script | What it tests |
 |---|---|
 | `imagegen-01-sanitize` | PII stripping (email, phone, credit card) and prompt truncation at 1800 characters |
 | `imagegen-02-policy` | Routing rule priority, first-match-wins behavior, REJECT decisions, equipment-trade route, catch-all |
-| `imagegen-03-cohort` | Canary rollout gate: cohort assignment, percentage thresholds, and determinism |
-| `imagegen-04-normalize` | `normalizeIntent()` signal-to-intent mapping: identity policy, equipment-trade derivation, brand name injection |
+| `imagegen-03-cohort` | `cohortGate()` — retired to a flat `'pilot'` constant (D-2026-06-19b, the old percentage-ramp is gone); confirms it stays that way regardless of args |
+| `imagegen-04-normalize` | `normalizeIntent()` signal-to-intent mapping: identity policy, equipment-trade derivation (DB-cached, `classification_codes` primary path, regex fallback), `needs_two_step_trade` enrichment skip, brand name injection |
 | `imagegen-05-fixtures` | 15 end-to-end routing scenarios — each confirms the full `normalizeIntent → policyEngine` pipeline produces the expected routing decision |
-| `imagegen-07-composite` | Google Gemini adapter for identity composites (`personInSceneComposite`) — HTTP mock tests that cover response parsing, error paths, and request shape |
-| `imagegen-08-remix-composite` | Google Gemini adapters for `sceneRemix` (single-image workspace remix) and `compositeImages` (generic 2-image composite, "AI Assisted") — same HTTP mock coverage as `imagegen-07`, plus validation tests (`sceneRemix` requires `imageUrl`; `compositeImages` requires exactly 2 images) and a check that `compositeImages`'s prompt never contains face/identity language |
+| `imagegen-07-gemini-vertex-gen` | **Replaces `imagegen-07-composite`/`imagegen-08-remix-composite` (deleted 2026-08-08)** — both mirrored the raw fetch()/`x-goog-api-key` Gemini Developer API transport retired by the 2026-07-30 Vertex AI migration (D-2026-07-30f), silently testing dead code. Rewritten against the current `@google/genai`/Vertex SDK shape (`callGeminiImage()`), the real guardrail-prompt builders (verbatim from `compositePrompt.ts`), and all three composite exports' orchestration — `personInSceneComposite`, `sceneRemix`, `compositeImages` — including `urlToBase64()`'s content-type/min-size guards. Deliberately excludes `identityDefectDetector.ts`'s vision-judge defect-retry pipeline (a separate, larger, still-uncovered surface) — stubbed, not silently absorbed. |
+
+---
+
+### `fuzzer_tests` catalog traceability — `sync-fuzzer-test-markers.cjs`
+
+`public.fuzzer_tests` (the toward-BDD Given/When/Then catalog, `.dwp/plans/bdd-test-management-system.md`)
+gives every row a real sequential `id`, used as a human-facing label ("fz-006") per Ken's
+2026-08-08 naming convention. The code implementing a row is marked directly in the script file:
+
+```js
+// #region fz-014 — Random navigation never lands on the error boundary
+... the code implementing that row's when_action/then_assertion ...
+// #endregion fz-014
+```
+
+Zero-padded to 3 digits, and recognized natively by VS Code/IntelliJ's `#region`/`#endregion`
+code-folding — a real editor benefit, not just a grep target — chosen over line numbers because a
+named region survives edits above it; a line number does not.
+
+`sync-fuzzer-test-markers.cjs` scans every script file for these markers and writes the
+**confirmed** location back into the row (`implementation_file`, `implementation_lines`,
+`marker_verified_at`) — the marker in code is the source of truth, the DB fields are a verified,
+re-checkable cache, not hand-typed prose that can drift out of sync with reality. Also flags two
+real problems: a marker in code with no matching `fuzzer_tests` row (orphaned/typo'd), and a row
+marked `'implemented'` with no marker found anywhere (a stale claim).
+
+```bash
+node scripts/sync-fuzzer-test-markers.cjs             # scan + write updates
+node scripts/sync-fuzzer-test-markers.cjs --dry-run   # scan + report only, no writes
+```
+
+No browser, no cost — pure filesystem scan + a handful of Supabase REST calls. Run it after
+adding, moving, or renumbering any `#region fz-<id>` marker, or after backfilling new
+`fuzzer_tests` rows against already-written code.
 
 ---
 
