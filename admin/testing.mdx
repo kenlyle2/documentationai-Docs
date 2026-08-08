@@ -286,6 +286,20 @@ aren't persisted anywhere else; testimonials and the schedule reasoning are re-f
 
 ---
 
+## `postglider-uilicious-tests` — the human-editable test layer
+
+Separate repo: `github.com/kenlyle2/postglider-uilicious-tests` (private). Real `I.click()`/
+`I.see()` Uilicious tests, run against the same live "PostGlider" Uilicious cloud project as
+`tests/e2e-integrated/phase3-uilicious.ts` below. Deliberately distinct from the `#region fz-<id>`-
+marked Playwright scripts in this repo — those markers serve Claude/dev traceability; Uilicious's
+plain DSL is the layer meant for a non-developer to read or hand-edit directly (add a wait,
+comment out a step), with a scheduled GitHub Actions sync (`sync-uilicious-saves.cjs`, every 15
+minutes) pulling any Studio-side "Save" back into git as the safety net. Full detail — including a
+real credential-leak-and-rotation incident from building it — lives in `decisions.md`
+D-2026-08-08l and the new repo's own README, not duplicated here.
+
+---
+
 ## Purchase-to-Production Integrated Test Suite (`tests/e2e-integrated/`)
 
 **Added since the last verification (this doc previously had no record of this suite at all).** This is the newest, most rigorous test in the repo — a real, live, 5-phase purchase-to-production chain that replicates what an actual paying customer experiences, built per `.dwp/plans/2026-07-15-e2e-integrated-test-suite.md`.
