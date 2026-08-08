@@ -2,27 +2,30 @@
 title: "Automated Testing"
 description: "Full test suite documentation: all scripts, shared utilities, accounts, what they test, and chain reasoning."
 visibility: internal
-verified_against_commit: 9f3af5cd
+verified_against_commit: 9ba659f
 ---
 
 <Callout kind="info">
   **Refreshed 2026-08-07** against current `postglider-auto` `main` (979 commits ahead of the
   previous `verified_against_commit: 0c7bb31`). This pass cross-checked every script this doc
   names against what's actually on disk today, added scripts that didn't exist yet at the last
-  verification, and corrected sections that had drifted from the real file content (see inline
-  notes below, especially **`app-04-mobile`**, which was fully rewritten and no longer does
-  pixel-diff visual regression). It also adds the `tests/e2e-integrated/` suite, which post-dates
-  the last verification entirely and is now the most current, most rigorous test in the repo.
-  Some deep-dive sections for scripts added since 0c7bb31 (`app-07`, `app-10/11`, `app-13/14/16`,
-  `app-18/19/20`, `onboard-05` through `onboard-13`, `social-04`, `billing-02`) are intentionally
-  summarized in the tables rather than given full narrative write-ups, to keep this refresh
-  scoped — flag to Ken if full deep-dives on those are wanted next.
+  verification, and corrected sections that had drifted from the real file content. It also adds
+  the `tests/e2e-integrated/` suite, which post-dates the last verification entirely and is now
+  the most current, most rigorous test in the repo. Some deep-dive sections for scripts added
+  since 0c7bb31 (`app-07`, `app-10/11`, `app-13/14/16`, `app-18/19/20`, `onboard-05` through
+  `onboard-13`, `social-04`, `billing-02`) are intentionally summarized in the tables rather than
+  given full narrative write-ups, to keep this refresh scoped — flag to Ken if full deep-dives on
+  those are wanted next.
 
   **Same-day follow-up:** `chaos-onboarding-walkthrough.cjs` and `chaos-fuzzer.cjs` added (see
   Root-Level Admin & Verification Scripts below) — the former now runs **automatically every day**
   via `.github/workflows/daily-chaos-regression.yml`, the first scheduled, unattended regression
   check in this repo. Every future test script must be added to this inventory as part of being
   considered done — see `postglider-auto/CLAUDE.md`'s Definition of Done.
+
+  **2026-08-08:** `app-04-mobile`'s real pixel-diff visual regression — flagged as orphaned in the
+  refresh above — has been restored, plus a new baseline-independent clipped-content check added
+  on top. See its own section below for the full detail; this is no longer a known gap.
 </Callout>
 
 ## Overview
@@ -68,7 +71,7 @@ node scripts/run-all.cjs social       # only the social-publishing tests
 | `app-01-ux` | `kenlyle+2@gmail.com` (real, landscaper) | Auth + navigation regression: login branding, sidebar links, gallery search, mobile overflow, sign-out. Flips `is_pilot_mode_active` via Supabase REST for pilot/passenger mode testing. |
 | `app-02-usage` | `kenlyle+2@gmail.com` (real) | Shallow smoke test across Dashboard/Generate/Gallery/Profiles/Settings/Billing — mostly "does the heading render," not deep per-feature verification. |
 | `app-03-vault` | `kenlyle+2@gmail.com` (real, ~8 images) | Media Vault regression: filters, hover actions, search, detail dialog, a real archive→unarchive round trip verified against filtered views. |
-| `app-04-mobile` | `kenlyle+2@gmail.com` (real) | **Rewritten since the last verification — no longer does pixel-diff visual regression.** Now a mobile (390×844) page smoke + coarse horizontal-overflow check (`document.body.scrollWidth`) across public and authenticated pages, plus a Pilot-vs-Passenger "Save to Library" visibility check. See the corrected write-up below. |
+| `app-04-mobile` | `kenlyle+2@gmail.com` (real) | Mobile (390×844) smoke + horizontal-overflow + clipped-content scan + real pixel-diff visual regression (restored 2026-08-08) across public and authenticated pages, plus a Pilot-vs-Passenger "Save to Library" visibility check. See the full write-up below. |
 | `app-05-pricing-routing` | Anonymous (+ mode-aware generate check) | Routing/redirect correctness, login CTA links, `/pre-checkout` content, `woo-sync` webhook contract-only check (no live credentials asserted). |
 | `app-06-network-resilience` | `kenlyle+2@gmail.com` (real) | Real generation → forced 15s offline → reconnect → responsiveness check. Duplicate-generation-prevention check is soft (logs a note, doesn't fail, if no warning appears). |
 | `app-07-mobile-layout` | `kenlyle+2@gmail.com` (real) | The rigorous version of the mobile overflow check — scans every DOM element for right-edge viewport bleed (not just `body.scrollWidth`), reports offending elements/classes, across more pages than app-04 (including the Generate "Creative Direction" panel and `/profiles/new`). |
@@ -654,25 +657,52 @@ Dedicated Media Vault regression suite. Calls `cleanupTestUserData` before launc
 
 ### app-04-mobile
 
-<Callout kind="warning">
-  **Corrected 2026-08-07.** Everything below this line previously described a pixel-diff visual
-  regression gate (baselines, `pixelmatch`/`pngjs`, diff overlays). That is no longer what this
-  script does — the file on disk is now `app-04-mobile.cjs` with an internal header naming it
-  "app-04-mobile-rewrite," and a full-repo grep confirms **no script currently imports
-  `scripts/_shared/visualRegression.cjs`** — the pixelmatch wrapper described here is orphaned,
-  not wired into anything. If a pixel-diff visual regression gate is still wanted, it needs to be
-  rebuilt and re-integrated; it does not currently exist despite this doc's prior claim.
+<Callout kind="info">
+  **Restored 2026-08-08** (see `TASKS.md`/`CLAUDE.md` Super Proactive mode item 7 for the full
+  incident). Real pixel-diff is back, on top of the smoke/overflow checks that stayed live the
+  whole time. Two independent bugs were also found and fixed while restoring it: `pixelmatch@7`
+  ships ESM-only, so `require('pixelmatch')` silently returned the wrong shape (fixed in
+  `visualRegression.cjs`); and the old baselines were `fullPage:true`, which is structurally
+  unstable as real content height grows over time (dashboard: 2712px → 14164px) — switched to a
+  fixed 390×844 viewport-only capture. All 7 baselines re-seeded fresh 2026-08-08.
 </Callout>
 
 **Screenshots:** `/tmp/pg-mobile-shots/`
+**Baselines:** `scripts/baselines/<page>.png` (viewport-only, 390×844 @2x — re-seeded 2026-08-08)
 **Credentials:** `kenlyle+2@gmail.com` / `BuzzLYear`
 **Viewport:** 390×844 (iPhone 14 Pro)
+**Default mode:** passenger (was pilot before 2026-08-08)
 
-Mobile page smoke + a coarse horizontal-overflow check (`document.body.scrollWidth > innerWidth` — a single check per page, not the element-by-element scan `app-07-mobile-layout` does) across public pages (login, pre-checkout, forgot-password, free-trial) and authenticated pages (dashboard, generate, gallery, profiles, settings, billing, settings/social), plus a mode-specific check that Passenger's "Save to Library" button is hidden in Pilot mode, and a sidebar-open overflow check.
+Three layers, run per authenticated page (dashboard, generate, gallery, profiles, settings,
+billing, settings/social — plus public-page smoke for login/pre-checkout/forgot-password/free-trial):
+
+1. **Smoke** — page loads, an expected text string appears (proves no crash/blank render).
+2. **Horizontal overflow** — `document.body.scrollWidth > innerWidth`, one check per page (for
+   the rigorous element-by-element version, see `app-07-mobile-layout` below).
+3. **Clipped-content scan** (`checkNoClippedContent()`, new 2026-08-08) — baseline-independent;
+   scans every element's real layout for `overflow:hidden` where content genuinely exceeds the
+   box (>10px, on elements ≥20px, to exclude rounding noise and deliberately-collapsed UI like
+   closed accordions). `text-overflow:ellipsis` truncation is reported as a soft note, not a
+   failure — that's a deliberate, visually-indicated pattern, not a bug. This directly answers
+   "is anything being cut off right now," which neither the overflow check nor the pixel-diff
+   (which can only detect *change* from a baseline, not correctness of the baseline itself) can.
+4. **Pixel-diff** (`runVisualCheck()`, restored 2026-08-08) — compares a viewport screenshot
+   against the saved baseline, 0.1% tolerance, diff overlay written to
+   `/tmp/pg-mobile-shots/<page>-diff.png` on failure. **`generate` is excluded from this layer
+   specifically** (`visualDiff:false` in the script's `PAGES` array) — confirmed live that its
+   content is inherently dynamic per-load (default business profile, live candidate/WITP counts,
+   batch-size state), so two consecutive real loads differ by ~10% of pixels with nothing broken.
+
+Plus a mode-specific check that Passenger's "Save to Library" button is hidden in Pilot mode, and
+a sidebar-open overflow check.
 
 ```bash
 node scripts/app-04-mobile.cjs [--headed] [--mode pilot|passenger]
 ```
+
+To update baselines after an intentional UI change:
+`rm scripts/baselines/<page>.png && node scripts/app-04-mobile.cjs` (reseeds automatically when no
+baseline file exists — always eyeball the new baseline once before trusting it).
 
 For the more rigorous, element-level overflow scan (reports the actual offending elements, 4px sub-pixel tolerance, more pages covered), see **`app-07-mobile-layout`** below — the two scripts are complementary, not duplicates.
 
