@@ -1227,6 +1227,30 @@ See `decisions.md` D-2026-08-10f for the full verification trail (why address-ma
 wasn't viable given this app's data shape, and why Census CBSA was chosen over AI-inferred metro
 names).
 
+### Real-customer niche+metro cohort day-of-week signal (same day, D-2026-08-10g)
+
+The day-of-week layer above never had a real cross-customer signal — only the sparsely-populated
+Predis-sourced `competitor_signals` table. Rather than wait on that external pipeline, a new
+materialized view derives the same kind of signal directly from PostGlider's own customers:
+
+- **`mv_niche_metro_day_deviation`** — `post_engagement` grouped by `(niche_id, metro_cbsa_code,
+  platform, published_day_of_week)`, mirroring the existing `mv_platform_hour_deviation` pattern
+  but scoped instead of global. Carries both `sample_count` (raw rows) and `business_count`
+  (`COUNT DISTINCT business_profile_id`) — the real trust gate is distinct businesses, not post
+  volume, so one business posting 500 times can never look like cohort consensus.
+- **`post_engagement.business_profile_id`** — a prerequisite fix: this table previously only
+  carried `user_id`, ambiguous for a multi-profile user. Resolved via `generated_ideas`/
+  `week_packs`, written going forward by `app/api/cron/engagement-refresh/route.ts`.
+- **`lib/actions/optimizePackSchedule.ts`** sources the day-layer signal from this cohort first
+  (gated on `business_count >= MIN_COHORT_BUSINESSES`, currently `3` — a starting heuristic),
+  falling back to the Predis-sourced `competitor_signals` table when no cohort clears the gate.
+- **`competitors.metro_cbsa_code`** was also added for symmetry (`scripts/backfill-competitor-metro-areas.cjs`:
+  `tagged=76 no_metro=44 failed=0`).
+
+The view is expected to be empty/sparse until real customer volume accumulates within a given
+(niche, metro) pair — this is data sparsity, not a bug; it self-populates as the customer base
+grows. See `decisions.md` D-2026-08-10g.
+
 ---
 
 ## GMB Testimonials — Wall of Fame Curation
