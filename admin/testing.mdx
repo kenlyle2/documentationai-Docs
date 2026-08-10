@@ -298,6 +298,33 @@ minutes) pulling any Studio-side "Save" back into git as the safety net. Full de
 real credential-leak-and-rotation incident from building it — lives in `decisions.md`
 D-2026-08-08l and the new repo's own README, not duplicated here.
 
+**Rows implemented (2026-08-10): fz-015 through fz-018** — Fill Viral / Fill Influencer / Fill
+Offer / Fill Backlog, all against `kenlyle+2@gmail.com`'s "Well Pruned Acres" profile. Two real,
+disclosed fixes came out of adding fz-017/018:
+- `/generate` defaults to the business profile with the most recent `created_at`, not a fixed
+  one — this account has 4 profiles, so "Well Pruned Acres in view" needed Well Pruned Acres'
+  `created_at` bumped to `now()` to stay the durable default. Uilicious's own `I.select()` cannot
+  reliably switch a native `<select>` to a non-default option in this project's cloud runner
+  (confirmed a platform limitation, not a syntax bug — the identical `I.select(label, option)`
+  pattern works elsewhere in this project, and re-selecting the already-selected option
+  "succeeds," but switching to any other option consistently errors).
+- The Backlog picker (fz-018) only renders inside the "Weekly Architect" card, which only renders
+  in **Pilot Mode** — a per-account toggle on `/settings` (`PilotModeCard`), not `/generate`
+  itself. `app/(app)/generate/page.tsx`'s own `togglePilotMode` callback and `pilotEligible` state
+  are dead code (defined, zero call sites) — Pilot Mode can only actually be turned on via
+  Settings. `kenlyle+2@gmail.com`'s `profiles.is_pilot_mode_active` was set to `true` directly
+  (the same column the real Settings toggle writes) as a one-time account-level test prerequisite.
+  Also added `data-testid` attributes (`pin-from-backlog-button`, `backlog-idea-card`,
+  `backlog-confirm-button`) to `components/generate/BacklogPickerModal.tsx` /
+  `WeeklyArchitectCard.tsx` (`postglider-auto` commit `ad00c91f`) so fz-018 didn't need a fragile
+  positional CSS selector to pick "the first idea."
+- A second password leak happened building these: `uilicious-cli project run --json` also echoes
+  the literal password value into its step output (not just the default non-JSON mode already
+  documented in D-2026-08-08l) — `--json` is **not** a safe mitigation for this CLI. The password
+  was rotated twice (once for a misfired API call that hit an unrelated anonymous auth row by
+  mistake — no real impact, that row has no email/password login path — then correctly for the
+  real account), both leaked values confirmed dead via a direct token-grant probe.
+
 ---
 
 ## Purchase-to-Production Integrated Test Suite (`tests/e2e-integrated/`)
