@@ -1201,6 +1201,34 @@ Returns `{ checked, inserted, dry: true }` without writing to `post_engagement`.
 
 ---
 
+## Publish Time Optimizer — Metro-Area (CBSA) Geo Tagging (2026-08-10)
+
+Geography layer groundwork for the Publish Time Optimizer (`lib/optimizer/publishTimeOptimizer.ts`),
+which already blends industry priors → niche/competitor signals → this business's own engagement →
+cross-customer hour deviation into a per-platform best day/hour. The explicit next layer named was
+geography — e.g. Saturday beating Thursday for NYC tattoo shops specifically, vs. Thursday beating
+Friday for tattoo shops generally.
+
+- **`business_profiles.metro_cbsa_code` / `.metro_area`** — every business is tagged with its real
+  US Census Bureau CBSA (Core-Based Statistical Area) code and display name, resolved via a
+  two-step live lookup: Google Places Text Search (`GOOGLE_PLACES_API_KEY`) resolves the profile's
+  free-text `location` field to lat/lng, then the Census Bureau's own geocoder resolves that point
+  to the official CBSA — no hand-maintained zip/city crosswalk table. New
+  `lib/utils/censusGeocoder.ts::resolveMetroArea()`, wired into `lib/onboarding/runOnboardingPipeline.ts`
+  as a best-effort, non-blocking step after profile create/patch. `scripts/backfill-metro-areas.cjs`
+  caught up the pre-existing profiles (`tagged=199 no_metro=24 failed=0` on the live 2026-08-10 run).
+- **`competitor_signals.metro_cbsa_code`** — a new nullable compound-key column alongside `niche_id`.
+  `NULL` stays the niche-general fallback row (today's only rows); a metro-specific row is additive,
+  never a replacement. `lib/actions/optimizePackSchedule.ts`'s competitor-signals lookup now prefers
+  an exact metro match over the niche-general row when one exists, falling back to the old behavior
+  otherwise.
+
+See `decisions.md` D-2026-08-10f for the full verification trail (why address-match geocoding
+wasn't viable given this app's data shape, and why Census CBSA was chosen over AI-inferred metro
+names).
+
+---
+
 ## GMB Testimonials — Wall of Fame Curation
 
 Business owners can flag specific Google Business Profile reviews as featured testimonials and
