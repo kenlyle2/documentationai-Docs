@@ -149,6 +149,29 @@ SET usage_monthly = 0, usage_daily = 0, usage_reset_date = CURRENT_DATE
 WHERE user_id = '<uuid>';
 ```
 
+### WooCommerce checkout URLs — must target a variation, not the parent product
+
+`admin_settings.woocommerce_urls` (jsonb, keyed by tier) drives the checkout links used by `/pre-checkout` and `/pricing`; `app/pre-checkout/page.tsx` also carries a hardcoded `FALLBACK_CHECKOUT` that must be kept in sync with the `pro` value.
+
+**"PostGlider Pro" (WooCommerce product 59) is a *variable* product** with 10 profile-count variations (482–491, SKUs `PG-PRO-1` through `PG-PRO-10`). A checkout URL that only specifies `add-to-cart=59` leaves WooCommerce with no variation selected and cannot complete a purchase — the URL must include `variation_id` and the variation's own attribute value:
+
+```
+https://postglider.com/cart/?add-to-cart=59&variation_id=482&attribute_profiles=1
+```
+
+`enterprise` (product 60) is a `simple` product, not variable — `add-to-cart=60` alone is correct for it and needs no `variation_id`.
+
+<Callout kind="warning">
+  Found and fixed 2026-08-11: `woocommerce_urls.pro` was `add-to-cart=59` with no variation, silently broken for anyone who actually clicked through it. `extractProductId()` in `app/api/pricing/woo-prices/route.ts` and `app/api/pricing/woo-sync/route.ts` also needed a fix — both now prefer a URL's `variation_id` over `add-to-cart` so live price sync reads the real variation price instead of the parent product's own (non-purchasable) listing. See `research/decisions.md` D-2026-08-11a.
+</Callout>
+
+To confirm a product's variations and their IDs/attributes directly against WooCommerce (don't guess IDs from memory):
+
+```bash
+curl -s "https://postglider.com/wp-json/wc/v3/products/59/variations?per_page=20" \
+  -H "Authorization: Basic $(echo -n "$WOOCOMMERCE_REST_KEY:$WOOCOMMERCE_REST_SECRET" | base64)"
+```
+
 ### Test accounts
 
 Test accounts (`kenlyle+2@gmail.com`) are not WooCommerce subscribers and never receive renewal webhooks. Reset manually with the query above using UUID `96afe716-532e-4538-8422-abbaf90a5d88`.
