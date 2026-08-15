@@ -1517,3 +1517,15 @@ All three `onboard-*` scripts call `checkGeneratePosts` after a successful accou
 | Generate button not found, page didn't load, or explicit error | FAIL |
 
 Screenshots are written with the `17-generate-*` prefix in each script's output directory.
+
+---
+
+## StepCapture video guides
+
+Real, interactive video walkthroughs of the app, captured live via `stepcapture-ultimate-batch.cjs` (see the Root-Level Scripts inventory above). Each is a real recording of the actual product, not a scripted screen mock — embed format confirmed live 2026-08-15 via StepCapture's own Share → Embed panel (`Video` tab).
+
+<iframe src="https://app.stepcapture.com/capture/43b94fe1c135687c4c690b74512d11e8/embed?type=video" width="100%" height="400" title="Onboarding through candidate review — PostGlider" frameborder="0" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+
+**Onboarding through candidate review** (27 steps) — a full walkthrough from `/start` through GMB import, website mining, Owner Appearance %, and reviewing real Offer/Virality/Influencer/Retell candidates before batch generation.
+
+More captures will be added here as they're recorded. The Tour Guide Agent (`app/api/autonomous/guide/route.ts`) can also surface a matching video inline in its in-app tour steps when one exists for the topic being asked about — see that route's `videoEmbedUrl` field (added 2026-08-15, decisions.md D-2026-08-15m).
