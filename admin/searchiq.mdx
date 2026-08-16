@@ -56,6 +56,10 @@ The `gallery-search` edge function and `/wp-json/postglider/v1/search` REST endp
 
 Images display in SearchIQ results because SearchIQ is configured to read `_pg_image_url` post meta directly — see the Image Custom Field step in per-client setup below. The Supabase URL is passed through to the search widget unchanged; no image processing occurs on the WordPress server.
 
+<Callout kind="warning">
+`_pg_image_url` is written via `wp_insert_post()`'s `meta_input` argument, not a later `update_post_meta()` call — it must already exist in `wp_postmeta` by the time `save_post` fires, because SearchIQ resubmits the document to its cloud index synchronously on that same hook (`siq_save_post` → `siq_insert_post`). A post-hoc meta write is too late for a brand-new post and permanently indexes it with a null image until something re-saves it later (fixed in `pg-media-vault` 0.4.6; see decisions.md D-2026-07-10e for the same symptom hand-fixed once before this was closed at the source).
+</Callout>
+
 ---
 
 ## Facet taxonomy design
@@ -69,6 +73,8 @@ Every AI tag written to `user_images.tags` is synced as a WP `post_tag` term. Th
 Flat (non-hierarchical) taxonomy. One term per image. Populated from the `artist` field in the sync payload. For a multi-artist tattoo studio, this is the equivalent of SearchIQ's Author facet — visitors filter by their preferred artist.
 
 Sync payload field: `"artist": "Mike Torres"`
+
+Also drives the stub post's `post_author` (via a lightweight, login-less WP user created per artist name — see `pg_resolve_artist_wp_user_id()` in `sync.php`), which is what SearchIQ's result-card byline ("By {author} on {date}") actually reads. Before this existed, every stub's `post_author` defaulted to user ID 0 and the byline rendered as "By  on {date}" with a blank name — the `pg_artist` taxonomy term alone never fed that field.
 
 ### `pg_content_type` — content category
 
