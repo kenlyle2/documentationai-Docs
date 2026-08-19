@@ -252,6 +252,24 @@ full Ultimate Batch just to exercise one image.
   `page.url()` right after navigating to it — both carry a live bearer token.
 </Callout>
 
+### Kelleen Gebler demo diagnostic scripts (postglider-auto repo root)
+
+Built 2026-08-19 while getting Kelleen's ("Go To Concierge, LLC",
+`0e97f49f-84b4-4d16-92b3-be9a08a791d9`) demo profile ready for a real Ultimate Batch — a mix of
+one-off repro tools and reusable route-callers, all hardcoded to her profile ID. Kept as saved
+tests rather than deleted since the same profile is likely to need re-poking before her sales
+conversation closes.
+
+| Script | What it does |
+|---|---|
+| `cleanup-and-discover-kelleen.mjs` | Deletes the garbage `competitor_accounts` rows that had accumulated for her profile (unrelated businesses — tattoo studios, a hiking overlook), then re-runs the real discovery route (`POST /api/autonomous/prefetch/discovery`) to repopulate it cleanly. |
+| `debug-niche-assist-codes.mjs` | Diagnostic: reads her `classification_codes`/services from the DB, then calls the real `generateNicheAssist()` directly (not via the route) with the same NAICS/SIC targets and business context production would use, to see per-code errors that the route's own error handling would otherwise swallow. |
+| `debug-niche-assist-raw.mjs` | Diagnostic: wraps global `fetch` to log the raw OpenAI response status/body when `generateNicheAssist()` calls `api.openai.com/v1/chat/completions`, since `callNicheAssist()` isn't exported for direct inspection. |
+| `refresh-niche-assist-kelleen.mjs` | Calls the real `POST /api/generate-niche-assist` route for her profile — the production path, not a reimplementation. |
+| `trigger-signal-detection-kelleen.mjs` | Calls the real Virality and Influencer prefetch routes (`POST /api/autonomous/prefetch/virality`, `.../prefetch/influencer`) for her profile, in sequence. |
+| `generate-robinreach-comparison-pdf.mjs` | Generates `docs/postforme-replacement-vendor-comparison-2026-08-18.pdf` — a vendor-comparison report evaluating RobinReach as a PostForMe replacement, substantiating PostForMe's failure to deliver value. No `lib/` imports, pure HTML→PDF via `playwright-core`. |
+| `open-stepcapture-as-mike.cjs` | Opens a real headed browser logged in as Mike Brown **with the StepCapture extension actually loaded** — unlike `view-as-mike.cjs`, which launches a plain `chromium.launch()`/`newContext()` that Playwright defaults to running with `--disable-extensions`. Mirrors `stepcapture-ultimate-batch.cjs`'s real `launchPersistentContext()` config. Same never-log-the-callback-URL/`page.url()` rule as `admin-reset-usage.cjs`. |
+
 ### `regenerate-pack-rationale.mjs` (`pg-projects/scripts/autonomous/` — shared, not postglider-auto's own)
 
 Rebuilds and re-saves an already-created pack's stored "Why this batch" rationale using the
@@ -408,6 +426,8 @@ These live directly at the repo root (not in `scripts/`), and split into two kin
 | `stepcapture-validate.cjs` | StepCapture automation validation, step 1 — confirms the MV3 side-panel extension loads, its runtime `extensionId` resolves, and its sidebar UI actually mounts; switches to the correct PostGlider team workspace. Uses a persistent gitignored profile (`.stepcapture-profile`) so login survives across runs. | `node stepcapture-validate.cjs` | dedicated StepCapture login, headed |
 | `stepcapture-start-capture.cjs` | StepCapture automation validation, step 2 — works around `chrome.sidePanel.open()` requiring a real user gesture by loading `sidebar/index.html` directly with the webpage tab opened and focused first, so the extension's "active tab" detection points at the webpage, not its own page. | `node stepcapture-start-capture.cjs` | dedicated StepCapture login, headed |
 | `stepcapture-smoke-test.cjs` | Minimal save-mechanism smoke test isolating the one structural difference between Ken's 2/2 successful manual StepCapture captures (Team Library's own "New Capture" button) and this automation's failed attempts (the extension sidebar's "Start Capture" button) — no real PostGlider account, no onboarding flow. Precursor to `stepcapture-ultimate-batch.cjs`. | `node stepcapture-smoke-test.cjs` | dedicated StepCapture login, headed |
+
+| `generate-robinreach-comparison-pdf.mjs` | Reusable report generator (not a test) — renders a real HTML comparison doc (capability table, pricing/break-even table, open-risk findings) to PDF via headless Chromium, same pattern as `scripts/_shared/make-pdf-report.cjs` but for narrative/tabular content instead of screenshots. Built 2026-08-18 for the PostForMe-replacement vendor comparison (`decisions.md` D-2026-08-18w) so the analysis could be handed to Mike as a document, not screen captures. Content is currently hardcoded per-report — extend/copy for the next comparison rather than trying to genericize prematurely. | `node generate-robinreach-comparison-pdf.mjs` | no browser login, no DB, writes to `docs/*.pdf` |
 
 **Not included** (one-off maintenance/migration tools, not repeatable regression tests — each says so in its own header comment): `regenerate-idea-images.cjs`, `trigger-purchase-webhook.cjs` (explicitly a temporary checkout-UI stand-in), `register-postforme-webhook.mjs`, `cleanup-test-postforme-posts.mjs`, `trigger-backfill-brand-asset-tags.cjs`.
 
