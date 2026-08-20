@@ -252,6 +252,25 @@ full Ultimate Batch just to exercise one image.
   `page.url()` right after navigating to it — both carry a live bearer token.
 </Callout>
 
+### `review-pack-images.mjs` (postglider-auto repo root — not `scripts/`)
+
+Downloads every item in a real pack (image + caption + category) to a local directory named by
+`batch_alpha_id`, for actually looking at each image next to its caption — not just confirming a
+URL resolves or an automated defect check passed. Built 2026-08-20 reviewing Kelleen Gebler's
+batch, which passed every automated check (solid-fill detector, Editor Agent) while two posts
+used the exact same thematically wrong stock photo (a beach cabana image on a post about local
+New Hope pride, and another about a team's morning ritual) — a real content-coherence mismatch no
+pixel-variance or LLM-redundancy check was checking for at all.
+
+```bash
+npx tsx --env-file=.env.local review-pack-images.mjs <packId> [outDir]
+```
+
+Prints each post's caption/category, saves its image as `<outDir>/<letter>.png` (default
+`./pack-review-<packId prefix>`). Then `Read` each saved image directly — this script only
+fetches and organizes; the actual judgment of "does this image match this caption" still needs a
+real look, human or Claude.
+
 ### Kelleen Gebler demo diagnostic scripts (postglider-auto repo root)
 
 Built 2026-08-19 while getting Kelleen's ("Go To Concierge, LLC",
