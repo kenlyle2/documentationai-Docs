@@ -1276,6 +1276,41 @@ grows. See `decisions.md` D-2026-08-10g.
 
 ---
 
+## Local Partners — Real, Geo-Scoped, Owner-Approved Local-Business Referrals (2026-08-20)
+
+Lets a business owner name real local partner businesses (a trusted dry cleaner, a food-delivery
+service, a grocery-delivery service) that the autonomous content agents can occasionally credit in
+posts — instead of the agent inventing a plausible-sounding local business name, which was the
+live gap before this shipped (Promote/Provide/Personalize's prompts had an unguarded "local
+partnership" content angle with no real data behind it).
+
+**The core safety design**: Google Places can confirm a candidate business exists and sits in the
+owner's own metro area — it can never confirm a real partnership exists. So a suggested candidate
+is never usable in generated content until the owner explicitly approves it in Settings. Three
+states: `pending` (AI-suggested, Places-verified only), `approved` (owner-confirmed, reaches
+caption generation), `rejected` (dismissed, kept so it isn't re-suggested).
+
+### What's built
+
+| Component | Path | Purpose |
+|---|---|---|
+| **Migration** | `supabase/migrations/20260820040000_local_partners.sql` | New `local_partners` table, RLS mirroring `competitors`' policy pattern |
+| **Discovery** | `lib/integrations/localPartnerFinder.ts` | Google Places Text Search by category (dry cleaner, food/grocery delivery), geo-filtered to the owner's own `metro_cbsa_code` — the same CBSA-tagging mechanism the Publish Time Optimizer section above uses. On-demand only, never auto-triggered during onboarding. |
+| **API** | `app/api/local-partners/route.ts`, `app/api/find-local-partners/route.ts` | CRUD + discovery-trigger, same conventions as `/api/competitors`/`/api/find-competitors` |
+| **Settings UI** | `components/settings/LocalPartnersCard.tsx` | "Suggest Partners" button → pending candidates with Approve/Reject → Approved Partners list |
+| **Guardrail** | `lib/autonomous/utils.ts`'s `noPartnerInventionGuidance()` | Wired into all 4 caption-generating agents (Promote/Provide/Personalize/InfluencerInputs) — holds even when no approved partners exist |
+| **Context injection** | `lib/autonomous/db.ts`'s `getApprovedLocalPartners()`, wired into the Orchestrator | Only ever reads `status = 'approved'` rows; injected into all 3 pillars' base context alongside the existing team-roster block |
+
+### Geo-scoping limitation (known, disclosed)
+
+CBSA (Census Core-Based Statistical Area) matching is the only geo-scoping mechanism available
+without new lat/lng infrastructure — this codebase doesn't store coordinates anywhere. CBSAs can
+span a large multi-county area, so "same CBSA" is looser than "same town." The Settings UI copy
+says this explicitly: suggested partners are metro-scoped only, not guaranteed genuinely nearby —
+the owner should still confirm a real relationship before approving.
+
+---
+
 ## GMB Testimonials — Wall of Fame Curation
 
 Business owners can flag specific Google Business Profile reviews as featured testimonials and
@@ -1642,3 +1677,5 @@ coverage: `business-name`/`business-location`/`business-industry` (`components/p
 | `WP_API_APP_PASSWORD` | `apiguy` application password for subsite provisioning |
 | `WP_API_BASE_URL` | `https://mypostglider.website` |
 | `APIFY_API_KEY` | `engagement-refresh` cron — Apify actor scraping for post metrics |
+| `GOOGLE_PLACES_API_KEY` | Competitor Finder, Local Partners discovery — Google Places Text Search |
+| `PEXELS_API_KEY` | Local Expert Agent — real local-scene photo fallback (Wikimedia Commons is primary, no key needed) |
