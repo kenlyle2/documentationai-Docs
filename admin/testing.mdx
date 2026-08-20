@@ -269,6 +269,7 @@ conversation closes.
 | `trigger-signal-detection-kelleen.mjs` | Calls the real Virality and Influencer prefetch routes (`POST /api/autonomous/prefetch/virality`, `.../prefetch/influencer`) for her profile, in sequence. |
 | `generate-robinreach-comparison-pdf.mjs` | Generates `docs/postforme-replacement-vendor-comparison-2026-08-18.pdf` — a vendor-comparison report evaluating RobinReach as a PostForMe replacement, substantiating PostForMe's failure to deliver value. No `lib/` imports, pure HTML→PDF via `playwright-core`. |
 | `open-stepcapture-as-mike.cjs` | Opens a real headed browser logged in as Mike Brown **with the StepCapture extension actually loaded** — unlike `view-as-mike.cjs`, which launches a plain `chromium.launch()`/`newContext()` that Playwright defaults to running with `--disable-extensions`. Mirrors `stepcapture-ultimate-batch.cjs`'s real `launchPersistentContext()` config. Same never-log-the-callback-URL/`page.url()` rule as `admin-reset-usage.cjs`. |
+| `regen-kelleen-half-image.cjs` | Logs in as a real user via magiclink, navigates to a given pack, then calls the real `POST /api/packs/[packId]/generate-images` for a list of idea ids in sequence (real cookies/session, not a service-role bypass) — built chasing the 2026-08-19/20 "half image" solid-fill defect chain, generalized to accept any list of idea ids/pack id rather than hardcoded to one. |
 
 ### `regenerate-pack-rationale.mjs` (`pg-projects/scripts/autonomous/` — shared, not postglider-auto's own)
 
