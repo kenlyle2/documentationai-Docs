@@ -622,6 +622,17 @@ curl -X POST "https://<project>.supabase.co/rest/v1/billing_events" \
 
 **ROI:** Prevents "I paid but my account wasn't upgraded" support tickets that require manual database intervention. The admin receives a high-signal email with a direct recovery link within 15 minutes of any terminal billing failure.
 
+<Callout kind="warning">
+**Never send a real Loops email (transactional or event-triggered) to a made-up address during
+testing.** Confirmed by Loops support 2026-08-21, referencing a real incident: on 2026-07-02 an
+abnormally high hard-bounce rate (from testing against fake/nonexistent addresses) triggered
+Loops' automatic sending shutdown for the **entire account** — not just the test — meaning real
+customer emails (welcome, trial nurture, billing alerts) stopped going out too, until Loops
+manually restored sending. Use `@example.com` or `@test.com` recipient addresses for any test
+send — Loops confirmed these respond with real response codes/bodies without ever attempting
+actual delivery, so they exercise the full send path safely.
+</Callout>
+
 ---
 
 ## Script Details
