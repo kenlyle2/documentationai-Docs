@@ -27,7 +27,7 @@ All three repos share the same backend project. The WP repos are canonical sourc
 | Text generation | Large language model (planning, ideas, niche codes) |
 | Business enrichment | Enrichment API |
 | Email | Transactional email service |
-| Social publishing | PostforMe (shared org account, `POSTFORME_API_KEY`) |
+| Social publishing | RobinReach (shared org account, `ROBINREACH_API_KEY`) — PostForMe still live for pre-cutover connections |
 | WordPress search | SearchIQ |
 
 ## Key Environment Variables
@@ -102,7 +102,27 @@ The Week Pack Generator is a pure client-side planning step that runs before any
 
 **Virality Engine stub:** Each `WeekPlanSlot` has a `viralityHint?: string` field. When the Virality Engine is integrated, it populates this field; the UI already renders it as a green "Virality boost" badge. No further schema or component changes needed at that point.
 
-**Social publishing (PostforMe):** PostGlider operates one shared PostforMe Team account. The `POSTFORME_API_KEY` environment variable (server-side only, never exposed to the browser) authenticates all calls via the `post-for-me` SDK (v2.7+). Two Route Handlers proxy PostforMe on behalf of authenticated users: `GET /api/postforme/connect?platform=<platform>` (returns an OAuth URL) and `GET /api/postforme/integrations` (returns the current integration list). Connected channels are stored in `postforme_connections` (Supabase, RLS-scoped to business profile owner).
+**Social publishing (RobinReach, cut over 2026-08-21):** PostForMe's vendor went unresponsive
+(0/14 GitHub issues ever answered) and was replaced by RobinReach — see `research/decisions.md`
+D-2026-08-20c through D-2026-08-20g for the full migration record. PostGlider operates one shared
+RobinReach account with one Brand per business profile (created automatically via `POST /brands`
+the first time a profile needs one). The `ROBINREACH_API_KEY` environment variable (server-side
+only, never exposed to the browser) authenticates all calls via `lib/robinreachClient.ts` — a
+thin typed REST wrapper, since no official RobinReach SDK exists. Unlike PostForMe, RobinReach has
+no API-driven OAuth connect and no invite API: a human admin must manually invite each customer's
+email into their Brand from RobinReach's own dashboard before that customer can log in and connect
+accounts themselves (also through RobinReach's dashboard, not an in-app popup). `lib/actions/
+socialPublishActions.ts`'s `requestRobinReachAccess()` handles the customer-facing side of this
+(stamps `business_profiles.robinreach_access_requested_at`, fires a Loops ops-alert event so the
+admin knows who's waiting); `syncAndListRobinReachAccounts()` live-reconciles connection state
+against RobinReach's own `GET /social_profiles` on demand, since there's no webhook to push
+updates. Connected channels are stored in `social_publish_connections` (Supabase, RLS-scoped to
+business profile owner) — a fresh table, not a rename of the old `postforme_connections`, since
+RobinReach's Brand-scoped model has nothing meaningful to carry over.
+
+PostForMe's own client (`lib/postformeClient.ts`, `lib/actions/postformeActions.ts`), routes
+(`app/api/postforme/*`), and `postforme_connections` table are left in place and still fully
+functional for any pre-cutover connections — not yet removed.
 
 ## Pilot Mode Drip Gate
 

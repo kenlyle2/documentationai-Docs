@@ -22,7 +22,7 @@ UserTour (self-hosted on Railway) lets us trigger contextual walkthroughs based 
 | `profile_complete` | bool | Has at least one business profile with name + industry |
 | `vault_has_images` | bool | `vault_image_count > 0` |
 | `first_idea_generated` | bool | `generated_ideas_count > 0` (dashboard-side) |
-| `social_connected` | bool | Any `postforme_connections` row exists |
+| `social_connected` | bool | Any `social_publish_connections` row exists (PostForMe replaced by RobinReach 2026-08-21 — see `research/decisions.md` D-2026-08-20c-g; pre-cutover connections still live in the old `postforme_connections` table) |
 | `onboarding_complete` | bool | `profile_complete && first_idea_generated` |
 | `stuck_score` | float | 0.0–1.0 churn risk score (nightly) |
 | `last_intent` | string | `active` / `no_ideas_3d` / `low_publish_cadence` / `empty_vault` |
@@ -138,7 +138,8 @@ SELECT
   (SELECT count(*) FROM generated_ideas g WHERE g.user_id = u.id) AS generated_ideas_count,
   (SELECT count(*) FROM curated_suggestions c WHERE c.user_id = u.id AND c.status = 'approved') AS approved_count,
   (SELECT count(*) FROM user_images i WHERE i.user_id = u.id) AS vault_image_count,
-  (SELECT count(*) FROM postforme_connections pc WHERE pc.user_id = u.id) AS social_connections,
+  (SELECT count(*) FROM social_publish_connections spc WHERE spc.user_id = u.id)
+    + (SELECT count(*) FROM postforme_connections pc WHERE pc.user_id = u.id) AS social_connections,
   (SELECT count(*) FROM business_profiles bp WHERE bp.user_id = u.id) AS business_profiles_count
 FROM auth.users u
 LEFT JOIN profiles p ON p.user_id = u.id

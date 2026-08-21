@@ -175,7 +175,8 @@ See `documentationai-Docs/admin/billing-injustice.mdx` for the full background o
 | `gemini_quota_exceeded` | Gemini API returns 429 | `lib/gemini.ts` | **Wired** |
 | `enrichment_complete` | Outscraper enrichment finishes | In registry — trigger not yet wired | Pending |
 | `niche_confirmed` | User confirms NAICS/SIC code in Settings | In registry — trigger not yet wired | Pending |
-| `social_account_connected` | PostforMe OAuth connection completes | In registry, allowlist — trigger not yet wired | Pending |
+| `social_account_connected` | Social OAuth connection completes | In registry, allowlist — trigger not yet wired | Pending |
+| `robinreach_access_requested` | Customer clicks "Request access" for RobinReach (no invite API exists — an admin must manually invite them) | `requestRobinReachAccess()`, socialPublishActions.ts | **Wired** |
 
 ---
 
@@ -193,7 +194,7 @@ Contact properties are set both **event-time** (immediate, per action) and via t
 | `pilotEligible` | boolean | `profiles.pilot_eligible` | — | ✓ |
 | `firstPostGeneratedAt` | string (ISO) | `generated_ideas` insert time | `generate-text` edge fn | — |
 | `firstPackCreatedAt` | string (ISO) | `week_packs` insert time | `campaignActions.ts` | — |
-| `socialConnected` | boolean | PostforMe connected accounts | To be wired | — |
+| `socialConnected` | boolean | RobinReach/PostForMe connected accounts | To be wired | — |
 | `businessName` | string | Onboarding | `onboarding/run` | — |
 | `industry` | string | Onboarding | `onboarding/run` | — |
 | `location` | string | Onboarding | `onboarding/run` | — |

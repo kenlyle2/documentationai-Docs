@@ -218,7 +218,7 @@ and what the autonomous agents can touch.
 ### How ideas reach `approved`
 
 1. **Approve in TinderReview** (fresh batch) — user taps Approve. In Passenger Mode this also
-   auto-schedules the post immediately via PostForMe.
+   auto-schedules the post immediately via RobinReach.
 2. **Save** in the single-idea result view — user saves a single generated post.
 3. **Add to Batch** in the backlog mini-tinder — user pulls a backlog/approved idea into their
    next content batch (sets `stage: 'approved'` immediately so the slot survives a page refresh).
@@ -1030,9 +1030,10 @@ audience response rather than AI intuition alone.
 
 | Component | Path | Purpose |
 |---|---|---|
-| **Migration** | `supabase/migrations/20260615002000_post_engagement.sql` | `public.post_engagement` table — one row per `(postforme_post_id, platform)`, updated daily |
-| **Migration** | `supabase/migrations/20260615003000_generated_ideas_postforme_post_id.sql` | Adds `postforme_post_id` column to `generated_ideas` so autonomous and Tinder-path posts are tracked |
-| **Cron endpoint** | `app/api/cron/engagement-refresh/route.ts` | Runs daily at 14:00 UTC. Fetches platform URLs from PostForMe, pulls engagement metrics via Apify. |
+| **Migration** | `supabase/migrations/20260615002000_post_engagement.sql` | `public.post_engagement` table — one row per `(social_post_id, platform)`, updated daily |
+| **Migration** | `supabase/migrations/20260820080000_generated_ideas_social_post_id.sql` | Adds `social_post_id` column to `generated_ideas` so autonomous and Tinder-path posts are tracked |
+| **Migration** | `supabase/migrations/20260820100000_social_post_provider_marker.sql` | Adds `social_provider` (`'postforme'` \| `'robinreach'`) so the cron knows which vendor's client to poll a given row against |
+| **Cron endpoint** | `app/api/cron/engagement-refresh/route.ts` | Runs daily at 14:00 UTC. Fetches platform URLs from the post's own vendor (PostForMe or RobinReach), pulls engagement metrics via Apify. |
 | **Butler** | `lib/agents/butler.ts` | Fetches engagement boosts in parallel with vault images; applies ±15% sort multiplier to pillar scores; injects top-performing pillar into the GPT-4o-mini scoring prompt. |
 | **Weekly Architect** | `app/api/weekly-architect/route.ts` + `lib/utils/orchestrator.ts` | Fetches engagement (Scan E), derives `pillarScores`, passes them to `buildArchitectPlan` which uses them to set the slot-per-pillar quota while cadence still governs which days. Returns `engagementHint` to the client. |
 | **Autonomous Orchestrator** | `app/api/autonomous/orchestrator/route.ts` | Derives full 3Ps quota from engagement; injects signal block into every agent prompt; stores used quota in `batch_generation_jobs.result.quotaUsed`. |
@@ -1040,22 +1041,29 @@ audience response rather than AI intuition alone.
 
 ### How it works
 
-1. Sources posts from **two places** (union, deduplicated by `postforme_post_id`):
+1. Sources posts from **two places** (union, deduplicated by `social_post_id`):
    - `week_pack_items JOIN week_packs` — posts scheduled via the Pack/Butler flow
-   - `generated_ideas WHERE postforme_post_id IS NOT NULL` — autonomous-generated posts and Tinder/swipe-path posts. The `postforme_post_id` is written back to `generated_ideas` immediately after `scheduleSocialPost()` succeeds.
+   - `generated_ideas WHERE social_post_id IS NOT NULL` — autonomous-generated posts and Tinder/swipe-path posts. The `social_post_id` is written back to `generated_ideas` immediately after `scheduleSocialPost()` succeeds.
 2. Skips posts already checked in the last 20 hours.
-3. Calls PostForMe `socialPostResults.list({ post_id })` to get the live platform post URL per social account. This URL is only available after PostForMe finishes processing — it is **not** available at schedule time.
+3. Branches per row on `social_provider` to get the live platform post URL: PostForMe posts call
+   `socialPostResults.list({ post_id })`; RobinReach posts call `posts.retrieve()`, whose response
+   includes `social_profiles[].remote_post_url` directly (no separate results endpoint needed).
+   Either way, the URL is only available once the vendor finishes processing — **not** at
+   schedule time. RobinReach has no webhook to push this sooner (unlike PostForMe, which also has
+   a webhook — `app/api/postforme/webhook/route.ts` — as defense-in-depth alongside this cron);
+   for RobinReach, this cron is the *only* path.
 4. Calls the appropriate Apify actor per platform to scrape engagement metrics:
    - Instagram: `apify~instagram-scraper` → `likesCount`, `commentsCount`, `videoViewCount`
    - Facebook: `apify~facebook-posts-scraper` → `likes`, `comments`, `shares`
    - LinkedIn: deferred (limited Apify coverage)
-5. Upserts to `post_engagement` — one row per `(postforme_post_id, platform)`, updated on each daily check.
+5. Upserts to `post_engagement` — one row per `(social_post_id, platform)`, updated on each daily check.
 
 ### Schema
 
 ```sql
 post_engagement (
-  postforme_post_id   text,       -- PostForMe internal post ID
+  social_post_id   text,       -- internal post ID from whichever vendor scheduled it
+  social_provider  text,       -- 'postforme' | 'robinreach'
   user_id             uuid,       -- post owner
   platform            text,       -- 'instagram' | 'facebook' | 'linkedin' | ...
   platform_post_url   text,       -- live URL on the platform
@@ -1092,7 +1100,7 @@ ENGAGEMENT SIGNAL (last 30 days, this business):
 - Falls back entirely to the default 2/3/2 split when all pillars are below threshold.
 - Provide absorbs rounding drift (bounds: 1–5); Promote and Personalize are capped at 3 each.
 - **±1 weekly cap**: each pillar can shift at most ±1 from the previous week's quota. Prevents a single viral post from whiplashing the quota. The previous quota is stored in `batch_generation_jobs.result.quotaUsed` and read at the start of each batch run.
-- Before averaging, `post_engagement` rows are **deduplicated by `postforme_post_id`**: a post published to both Instagram and Facebook creates two rows, but only the platform with the higher engagement score counts toward the pillar average.
+- Before averaging, `post_engagement` rows are **deduplicated by `social_post_id`**: a post published to both Instagram and Facebook creates two rows, but only the platform with the higher engagement score counts toward the pillar average.
 
 This closes the feedback loop: Gemini generates content → user publishes → Apify measures
 response → Orchestrator reads `post_engagement` → next batch reflects real audience response.
@@ -1101,12 +1109,12 @@ response → Orchestrator reads `post_engagement` → next batch reflects real a
 
 Butler runs `getEngagementBoosts(userId)` on every call, in parallel with the vault image fetch (no added latency). It returns a per-pillar multiplier in the range 0.85–1.15:
 
-- Fetches `post_engagement` for the last 30 days, deduplicates by `postforme_post_id`
+- Fetches `post_engagement` for the last 30 days, deduplicates by `social_post_id`
 - Requires ≥5 posts per pillar before computing a boost — below that, all multipliers are 1.0 (no effect)
 - Applies the multiplier to the final `butler_score` used for sorting — AI scoring stays authoritative; engagement nudges ordering by at most ±15%
 - The top-performing pillar is also injected into the GPT-4o-mini scoring prompt as: *"personalize posts earn the most likes and comments from this business's real followers — weight gap_fill higher for ideas in this category"*
 
-**Practical effect for admins:** For a new account with no engagement data, Butler behaves exactly as before. Once an account accumulates 5+ published posts per pillar (tracked via `postforme_post_id`), Butler's top-ranked ideas will organically skew toward the pillar the audience actually responds to.
+**Practical effect for admins:** For a new account with no engagement data, Butler behaves exactly as before. Once an account accumulates 5+ published posts per pillar (tracked via `social_post_id`), Butler's top-ranked ideas will organically skew toward the pillar the audience actually responds to.
 
 ### Weekly Architect integration
 
@@ -1153,19 +1161,19 @@ ORDER BY created_at DESC
 LIMIT 5;
 ```
 
-**Check which generated_ideas posts have been linked to PostForMe (and are therefore trackable):**
+**Check which generated_ideas posts have been linked to a vendor post (and are therefore trackable):**
 ```sql
-SELECT id, content_category, postforme_post_id, created_at
+SELECT id, content_category, social_post_id, social_provider, created_at
 FROM generated_ideas
 WHERE user_id = '<uuid>'
-  AND postforme_post_id IS NOT NULL
+  AND social_post_id IS NOT NULL
 ORDER BY created_at DESC
 LIMIT 20;
 ```
 
 **Why is a pillar not influencing the quota?** Check if it has fewer than 5 tracked posts:
 ```sql
-SELECT content_category, COUNT(DISTINCT postforme_post_id) AS unique_posts
+SELECT content_category, COUNT(DISTINCT social_post_id) AS unique_posts
 FROM post_engagement
 WHERE user_id = '<uuid>'
   AND checked_at > now() - interval '30 days'
@@ -1191,7 +1199,7 @@ hosted on **Railway** (live 2026-06-16). It writes X/TikTok engagement metrics t
 `post_engagement` table and schema as Instagram/Facebook, so Butler, Weekly Architect, and the
 Autonomous Orchestrator pick up X/TikTok data automatically once the `postglider-auto` route is wired.
 
-**How it works:** PostForMe issues a `postforme_post_id` for all platforms including X and TikTok.
+**How it works:** The scheduling vendor (PostForMe or RobinReach) issues a `social_post_id` for all platforms including X and TikTok.
 After publishing, the `engagement-refresh` cron already stores the live post URL in
 `post_engagement.platform_post_url` — it just leaves engagement metrics NULL for X/TikTok (no Apify
 actor). The 30 Days Agent reads those NULL rows and fills them in using the Railway service.
@@ -1210,8 +1218,9 @@ See `postglider-auto/docs/adr/ADR002-30days-agent-x-tiktok.md` for the decision 
 
 | Env var | Where | Purpose |
 |---|---|---|
-| `APIFY_API_KEY` | Vercel (production) | Apify scraping — cron degrades gracefully without it (stores platform URL only) |
-| `POSTFORME_API_KEY` | Vercel (production) | PostForMe client — reads `socialPostResults` |
+| `APIFY_API_KEY` | Cloud Run (production) | Apify scraping — cron degrades gracefully without it (stores platform URL only) |
+| `POSTFORME_API_KEY` | Cloud Run (production) | PostForMe client — reads `socialPostResults`, still live for existing PostForMe-scheduled posts |
+| `ROBINREACH_API_KEY` | Cloud Run (production) | RobinReach client — the active vendor for new scheduling as of 2026-08-21 |
 
 ### Dry run
 
