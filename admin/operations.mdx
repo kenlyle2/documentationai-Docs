@@ -1315,7 +1315,7 @@ grows. See `decisions.md` D-2026-08-10g.
 
 ---
 
-## Local Partners — Real, Geo-Scoped, Owner-Approved Local-Business Referrals (2026-08-20)
+## Local Partners — Real, Geo-Scoped, Owner-Approved Local-Business Referrals (2026-08-20, opt-in redesign 2026-08-22)
 
 Lets a business owner name real local partner businesses (a trusted dry cleaner, a food-delivery
 service, a grocery-delivery service) that the autonomous content agents can occasionally credit in
@@ -1329,14 +1329,37 @@ is never usable in generated content until the owner explicitly approves it in S
 states: `pending` (AI-suggested, Places-verified only), `approved` (owner-confirmed, reaches
 caption generation), `rejected` (dismissed, kept so it isn't re-suggested).
 
+**Explicit opt-in gate (2026-08-22, `research/decisions.md` D-2026-08-22i):** discovery only ever
+fires when `business_profiles.local_partners_enabled = true` — never inferred, never on by
+default. The original 2026-08-20 design correctly avoided a blanket auto-trigger, but discovery
+was reachable *only* via the Settings button, which most businesses (especially brand-new
+signups, with nothing partner-worthy to name yet) never find on their own. Three ways the flag
+gets set:
+
+1. **Onboarding opt-in** — a checkbox on `/onboarding`'s Instagram-handle step: "Do you have
+   partners you want to promote via your social channel? Possibly suppliers, secondary geographic
+   locations, affiliates, or vendors?" Off by default; feeds `wantsLocalPartners` through
+   `POST /api/onboarding/run` → `runOnboardingPipeline()`.
+2. **Settings toggle** — `LocalPartnersCard.tsx`'s header gained an on/off switch
+   (`PATCH /api/local-partners/toggle`); the card's body (suggest/approve/manual-add) is hidden
+   while off.
+3. **Delayed reminder** — `app/api/cron/local-partners-reminder` (daily; **Cloud Scheduler job
+   not yet created**, see this repo's TASKS.md) finds profiles 30-31 days old, still off, never
+   reminded (`local_partners_reminder_sent_at IS NULL`), and fires a `local_partners_reminder`
+   Loops event pointing them at My Vibe settings.
+
+Turning the flag on (either path 1 or 2) fires `findLocalPartners()` once immediately — the
+owner doesn't have to separately click "Suggest Partners" right after opting in.
+
 ### What's built
 
 | Component | Path | Purpose |
 |---|---|---|
-| **Migration** | `supabase/migrations/20260820040000_local_partners.sql` | New `local_partners` table, RLS mirroring `competitors`' policy pattern |
-| **Discovery** | `lib/integrations/localPartnerFinder.ts` | Google Places Text Search by category (dry cleaner, food/grocery delivery), geo-filtered to the owner's own `metro_cbsa_code` — the same CBSA-tagging mechanism the Publish Time Optimizer section above uses. On-demand only, never auto-triggered during onboarding. |
-| **API** | `app/api/local-partners/route.ts`, `app/api/find-local-partners/route.ts` | CRUD + discovery-trigger, same conventions as `/api/competitors`/`/api/find-competitors` |
-| **Settings UI** | `components/settings/LocalPartnersCard.tsx` | "Suggest Partners" button → pending candidates with Approve/Reject → Approved Partners list |
+| **Migration** | `supabase/migrations/20260820040000_local_partners.sql`, `20260822010000_local_partners_opt_in.sql` | `local_partners` table + RLS; `business_profiles.local_partners_enabled`/`local_partners_reminder_sent_at` |
+| **Discovery** | `lib/integrations/localPartnerFinder.ts` | Google Places Text Search by category (dry cleaner, food/grocery delivery), geo-filtered to the owner's own `metro_cbsa_code` — the same CBSA-tagging mechanism the Publish Time Optimizer section above uses. Gated on `local_partners_enabled`, callable from onboarding, the Settings toggle, or the existing "Suggest Partners" button. |
+| **API** | `app/api/local-partners/route.ts`, `app/api/local-partners/toggle/route.ts`, `app/api/find-local-partners/route.ts` | CRUD + on/off toggle + discovery-trigger, same conventions as `/api/competitors`/`/api/find-competitors` |
+| **Reminder cron** | `app/api/cron/local-partners-reminder/route.ts` | Daily; ~30 days post-signup, still off, not yet reminded → fires Loops event, stamps the guard column |
+| **Settings UI** | `components/settings/LocalPartnersCard.tsx` | On/off switch in the header → (when on) "Suggest Partners" button → pending candidates with Approve/Reject → Approved Partners list |
 | **Guardrail** | `lib/autonomous/utils.ts`'s `noPartnerInventionGuidance()` | Wired into all 4 caption-generating agents (Promote/Provide/Personalize/InfluencerInputs) — holds even when no approved partners exist |
 | **Context injection** | `lib/autonomous/db.ts`'s `getApprovedLocalPartners()`, wired into the Orchestrator | Only ever reads `status = 'approved'` rows; injected into all 3 pillars' base context alongside the existing team-roster block |
 
@@ -1414,16 +1437,33 @@ binary the main app's image doesn't carry.
 A second, source-agnostic implementation of the same agent, built to test whether the Predis.ai
 dashboard scrape above is even necessary. `computeSignals()`/`computeThemeRoi()` already operate
 purely on `RawCompetitorData` and don't care where the post list came from — this pipeline fetches
-that same shape directly from ScrapeCreators (`/v1/instagram/profile` + paginated
-`/v2/instagram/user/posts`) instead of scraping a UI. **Status: promoted to a real agent +
-route — `lib/autonomous/scrapeCreatorsCompetitiveIntelAgent.ts`
-(`runScrapeCreatorsCompetitiveIntelAgent()`) and `POST /api/autonomous/scrapecreators-competitor-intel-agent`.**
-No Chromium needed, so unlike the Predis agent above this one runs inside the main
-`postglider-autonomous` Cloud Run service rather than a dedicated one. Writes to the same
-`autonomous.competitor_intel_predis` table as the Predis pipeline, distinguished by a `source`
-column (`'predis' | 'scrapecreators'`) — not yet in the Orchestrator's automatic trigger path
-(manual/onboarding-triggered call only for now). Full narrative and real measured costs are in
-`docs/BUILD-HISTORY.md`'s 2026-06-24 entries.
+that same shape directly from ScrapeCreators (`/v1/instagram/profile` or `/v1/facebook/profile` +
+paginated posts) instead of scraping a UI. **Status: promoted to a real agent + route —
+`lib/autonomous/scrapeCreatorsCompetitiveIntelAgent.ts` (`runScrapeCreatorsCompetitiveIntelAgent()`)
+and `POST /api/autonomous/scrapecreators-competitor-intel-agent`.** No Chromium needed, so unlike
+the Predis agent above this one runs inside the main `postglider-autonomous` Cloud Run service
+rather than a dedicated one. Writes to the same `autonomous.competitor_intel_predis` table as the
+Predis pipeline, distinguished by a `source` column (`'predis' | 'scrapecreators'`) — not yet in
+the Orchestrator's automatic trigger path (manual/onboarding-triggered call only for now). Full
+narrative and real measured costs are in `docs/BUILD-HISTORY.md`'s 2026-06-24 entries.
+
+**Facebook support + cross-channel wrapper (2026-08-22).** Was Instagram-only until this date —
+`getFacebookProfile()` (follower count) was the last missing piece after Facebook posts were
+wired 2026-08-18. `runScrapeCreatorsCompetitiveIntelAgent()` now takes a real
+`platform: 'instagram' | 'facebook'` param, and a new `runCrossChannelCompetitiveIntel()` wrapper
+runs both and adds `computePlatformSync()`'s day-of-week flip/alignment classification — the same
+mechanism the original ManFlowYoga optimizer work (above) is grounded in. See `research/
+decisions.md` D-2026-08-22h for the real report this was built for (Lenny Calisthenics).
+
+**A second consumer, distinct from third-party competitor reports: Layer 3 self-analysis, now a
+standard onboarding step (2026-08-22).** `lib/onboarding/seedOwnEngagementSignal.ts` calls this
+same agent against the *signing-up business's own* handle (not a competitor's) and upserts the
+resulting posts into `post_engagement` — bootstrapping the Publish Time Optimizer's "own
+engagement, self-improving" layer (see that section above) from real historical performance
+instead of waiting weeks for it to accumulate via `engagement-refresh`. Wired into
+`runOnboardingPipeline.ts` as a fire-and-forget step, real cost confirmed well under $0.20
+combined for both platforms — cheap enough to run for every onboarding with a known handle, not
+gated behind any cadence decision. See `research/decisions.md` D-2026-08-22h.
 
 **Theme/tag generation is not one mechanism — three different tiers, worth knowing before
 treating any of it as a stable taxonomy:**
@@ -1444,14 +1484,17 @@ stable across weeks (e.g. a trend line per theme) without first adding a theme-i
 mechanism — none exists today.
 </Callout>
 
-**Onboarding integration — not yet built, design only.** This pipeline depends on
+**Third-party competitor report onboarding integration — still not built, design only.** (Distinct
+from the Layer 3 self-analysis integration above, which IS built — this paragraph is specifically
+about generating a report on a *competitor's* account at signup time.) This still depends on
 `autonomous.competitor_accounts` already having a resolved handle, which today only comes from
 the existing bi-weekly `prefetch/discovery` cron (Wednesday 02:00 UTC) — there's no synchronous
 path from "client signs up" to "first competitor report" yet. A full run also takes multiple
 minutes (4 sequential Gemini calls + ~11 paginated ScrapeCreators fetches in testing), so it
 cannot run inline during onboarding regardless — it needs to be a background job with a
-ready-notification, the same async pattern other autonomous agents already use. See `TASKS.md`
-in `postglider-auto` for the open onboarding-wiring items.
+ready-notification, the same async pattern other autonomous agents already use (and the same
+fire-and-forget pattern the Layer 3 seed already uses). See `TASKS.md` in `postglider-auto` for
+the open onboarding-wiring items.
 
 **Real cost per report, measured live via `usageMetadata` and ScrapeCreators' `credits_remaining`
 deltas, not estimated:** ~$0.05-0.06 for the base Predis-equivalent report (topic clustering +
