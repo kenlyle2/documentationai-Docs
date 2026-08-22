@@ -1233,6 +1233,36 @@ Returns `{ checked, inserted, dry: true }` without writing to `post_engagement`.
 
 ---
 
+## Customer social-account connections (RobinReach)
+
+How a customer connects Instagram/Facebook/etc. to their business profile, end to end, fully
+automated as of 2026-08-22 — no admin step of any kind.
+
+1. Each business profile gets its own RobinReach **Brand** (`business_profiles.robinreach_brand_id`),
+   created lazily on first use via `ensureRobinReachBrand()` (`lib/actions/socialPublishActions.ts`)
+   — one Brand per business profile, never shared.
+2. From `/settings/social`, the customer clicks **Add channel**, which opens
+   `components/settings/RobinReachConnectModal.tsx`. On open, `getRobinReachConnectLink()` calls
+   RobinReach's real `POST /connect_links` API and returns a fresh, Brand-scoped **Magic Connect
+   Link** — a real URL (`https://robinreach.com/connect/{token}`) the customer opens to connect
+   their accounts directly. No RobinReach account, no login, and no RobinReach branding is shown
+   in that flow, so it reads as part of the PostGlider product.
+3. RobinReach has **no webhooks** — there's no way for RobinReach to push "this customer just
+   connected Instagram" to us. The customer clicks **Check connections** back in the modal (or it
+   auto-checks on open), which calls `syncAndListRobinReachAccounts()` — a live `GET
+   /social_profiles?brand_id=...` reconciliation that upserts `social_publish_connections` and
+   returns the current state. The same reconciliation also runs implicitly whenever
+   `/settings/social` loads.
+
+**Before 2026-08-22** this required a manual step: an admin (Ken) had to individually invite each
+customer's email into their Brand from RobinReach's own dashboard before they could log in at
+all, since RobinReach had no invite API — a `requestRobinReachAccess()` action fired an ops-alert
+Loops event asking an admin to go do this. Once RobinReach's Magic Connect Link API was confirmed
+working, `getRobinReachConnectLink()` replaced that entire flow — see the workspace's
+`research/decisions.md` D-2026-08-22b/c.
+
+---
+
 ## Publish Time Optimizer — Metro-Area (CBSA) Geo Tagging (2026-08-10)
 
 Geography layer groundwork for the Publish Time Optimizer (`lib/optimizer/publishTimeOptimizer.ts`),
