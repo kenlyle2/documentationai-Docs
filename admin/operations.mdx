@@ -1315,6 +1315,46 @@ grows. See `decisions.md` D-2026-08-10g.
 
 ---
 
+## Loops email architecture — the rule that prevents duplicate sends (2026-08-22)
+
+`lib/loops.ts`'s `LoopsEventName` union is the registry of every event this app can fire via
+`loopsFireEvent()`. Two structurally different delivery mechanisms exist in this codebase for
+turning an event into an actual email, and **mixing both for the same event is what caused a real,
+live bug** (found and fixed 2026-08-22, `decisions.md` D-2026-08-22j):
+
+1. **Loops-native workflows** — an `EventTrigger` node built in the Loops dashboard/API
+   (`GET /v1/workflows`), with its own timers/branches, entirely inside Loops. `lib/loops.ts`'s
+   `loopsFireEvent()` is the only code-side call needed; Loops handles the rest.
+2. **App-code-driven sends** — either an Upstash Workflow route under `app/api/workflows/*`
+   (`triggerWorkflow()`, for multi-step/delayed sequences like trial nurture) or a direct
+   `loopsSendTransactional()` call at the event's own call site (for a single immediate email,
+   the pattern used for the 2026-08-22 ops-alert/notification emails below).
+
+**Rule: pick exactly one mechanism per event, never both.** The "Trial Nurture Sequence" incident
+was `trial_started` wired to a live Loops-native workflow *and* an Upstash-driven
+`/api/workflows/trial-nurture` route simultaneously — every trial signup got the Day 0/3/7 emails
+twice. Before adding a new event or a new email for an existing one, check `GET /v1/workflows`
+for a matching `EventTrigger` (Loops account, not just this codebase) as carefully as you'd check
+this codebase's own call sites.
+
+**Current default for new events (established 2026-08-22): direct `loopsSendTransactional()` at
+the call site, not a Loops-native workflow.** Keeps sequencing logic in code (reviewable, testable,
+git-blame-able) rather than split across two systems. `loopsFireEvent()` is still called
+alongside it — its only remaining job is contact-property tagging/segmentation in Loops, not
+triggering a send. Transactional template ids live in `lib/config/workflowTemplates.ts`
+(`WORKFLOW_TEMPLATES`), one constant per event — never hardcode an id at a call site (the one
+exception, documented inline, is `detect-split-accounts.cjs`, which must stay dependency-free to
+run standalone as a Cloud Run Job).
+
+**Before firing a new event for the first time, ask:** does an existing Upstash Workflow route or
+transactional send already cover this moment under a different trigger? `subscription_upgraded`
+looked like a gap in the 2026-08-22 audit but turned out to already be covered by
+`/api/workflows/pro-welcome` (triggered at the same call site, for the same tier-change) — building
+a dedicated email for the event itself would have been a second, duplicate mechanism for the exact
+moment `pro-welcome` already handles. See `decisions.md` D-2026-08-22k for the full reasoning.
+
+---
+
 ## Local Partners — Real, Geo-Scoped, Owner-Approved Local-Business Referrals (2026-08-20, opt-in redesign 2026-08-22)
 
 Lets a business owner name real local partner businesses (a trusted dry cleaner, a food-delivery
