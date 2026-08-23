@@ -70,9 +70,7 @@ Fast, pure-function tests — no browser, no dev server, no real API calls, no b
 
 | Script | Account | What it tests |
 |---|---|---|
-| `onboard-01-staytrue` | `test+staytruetattoopa@gmail.com` (fake) | `/start`/`/onboarding` flow — StayTrue Tattoo PA: enrichment, GMB check, business form, real photo upload, generate, claim, `/generate` smoke check. Prod-capable by default (`resolveBase()`), `--dev` for localhost. |
-| `onboard-02-colono` | `test+colonoconstruccion@gmail.com` (fake) | Same flow + direct enrichment API call first; audits every field by name. Prod-capable by default. |
-| `onboard-03-roccos` | `test+roccospizza@gmail.com` (fake) | Same flow as colono — Rocco's Pizza Collegeville PA (restaurant type). Prod-capable by default. |
+| `app-17-autonomous-e2e --onboarding-only --business <staytrue\|colono\|roccos>` | `test+<business>@gmail.com` (fake) | Consolidated 2026-08-23 from `onboard-01-staytrue`/`onboard-02-colono`/`onboard-03-roccos` (deleted — see below). `/onboarding?mode=trial` flow for one of three business fixtures: enrichment, business form, real photo upload + Instagram-URL regression coverage (staytrue only), generate, claim, `/generate` smoke check. Prod-capable by default (`resolveBase()`), `--dev` for localhost. |
 | `onboard-04-trial` | `test+trial-<timestamp>@postglider.com` (fake) | 7-day reverse trial lifecycle via API/DB only (no browser): claim → `tier=pro`+`trial_ends_at`, then backdates `trial_ends_at` and runs the real `pg_cron` downgrade SQL, asserts flip back to `tier=free`. **Hardcoded to `localhost:3000`** — local-only despite the naming convention. |
 | `onboard-05-manual-l22` | synthetic "L22 Test Tattoo Co." | API/DB test of the manual (no-website) onboarding body path — asserts `business_profiles.onboarding_source='manual'` and non-empty classification codes. Local-only (`localhost:3000`). |
 | `onboard-06-skipforward-l22` | synthetic "Skipforward Test Co." | Regression for the `{existingProfileId}` skip-forward fix — posting just an existing profile ID completes via that row instead of duplicating it. Local-only. |
@@ -99,7 +97,7 @@ Fast, pure-function tests — no browser, no dev server, no real API calls, no b
 | `app-14-onboarding-usertour` | fresh disposable email each run | Full free-trial → onboarding → claim → UserTour SDK check (`window.usertour.isIdentified()`), plus a live UserTour REST API trait check if creds are set. The one script that explicitly documents defaulting to **production** so recorded runs don't need "this is just my machine" caveats. |
 | `app-15-gmb-connect` | `kenlyle+2@gmail.com` (real) | Infrastructure checks for Google Business Profile OAuth connect flow: 401 when unauthenticated, valid Google OAuth URL returned authenticated, callback error paths redirect correctly, social settings page renders GMB row, Connect button initiates OAuth navigation. Does not test a completed OAuth exchange. |
 | `app-16-guided-tour` | `kenlyle+2@gmail.com` (real) | AI "Get help" guided-tour widget: 401 unauthenticated, popover opens, real live-LLM question produces a real spotlight tour overlay with working Next/Done navigation — exercised 3 times with different real questions. |
-| `app-17-autonomous-e2e` | `kenlyle+N@gmail.com` (temp) | The single most comprehensive test in the repo: free-trial signup → onboarding → claim → enable autonomous → real competitor discovery → real orchestrator run (~$0.05/run in Gemini tokens) → poll `batch_generation_jobs` → verify `generated_ideas`/`week_packs` → render the real pack page → verify Batch Rationale reflects real upstream signals (several checks are soft/logged-warning rather than hard-failing). Hardcoded to **production**, self-cleaning. `--dry-run` skips the costly orchestrator call. |
+| `app-17-autonomous-e2e` | `test+<business>@gmail.com` (fake, per `--business` fixture — default `staytrue`) | The single most comprehensive test in the repo: free-trial signup → onboarding → claim → enable autonomous → real competitor discovery → real orchestrator run (~$0.05/run in Gemini tokens) → poll `batch_generation_jobs` → verify `generated_ideas`/`week_packs` → render the real pack page → verify Batch Rationale reflects real upstream signals (several checks are soft/logged-warning rather than hard-failing). Prod by default, self-cleaning. `--dry-run` skips the costly orchestrator call; `--onboarding-only` skips the whole autonomous pipeline (registration/claim/smoke-check only — absorbed `onboard-01/02/03`'s scope, 2026-08-23). |
 | `app-18-calendar-day-zoom` | `kenlyle+2@gmail.com` (real) | **Has zero assertions.** Opens the calendar, clicks a day cell, and only `console.log`s/screenshots the result for a human to read — cannot fail. Looks like a leftover diagnostic script, not a maintained regression test. |
 | `app-19-calendar-popup-close` | `kenlyle+2@gmail.com` (real) | Real regression: the calendar event popover's close button must stay in-viewport on a short mobile screen. Falls back to a static HTML fixture if the account has no scheduled posts — a pass in that case reflects only the fixture, not real data. |
 | `app-20-new-composite-routes` | `kenlyle+2@gmail.com` (real, 2 hardcoded profiles) | Live-cost coverage of two previously-untested routing paths: WORKSPACE_REMIX (via the real Passenger `/generate` flow) and MULTI_IMAGE_COMPOSITE ("AI Assisted"), each checked for correct `routing_key`, correct model tier, and an AI-judged coherence pass on the real generated image. **Headed by default** ("Ken wants to watch these run") — pass `--headless` to opt out. |
@@ -650,54 +648,33 @@ actual delivery, so they exercise the full send path safely.
 
 ## Script Details
 
-### onboard-01-staytrue
+### app-17-autonomous-e2e
 
-**Screenshots:** `/tmp/pg-staytrue-shots/`
-**Test domain:** `staytruetattoopa.com`
-**Credentials:** `test+staytruetattoopa@gmail.com` / `TestPass123!`
-**Viewport:** 390×844 (iPhone 14 Pro)
+**Screenshots:** `/tmp/pg-autonomous-shots/`
+**Business fixtures (`--business <name>`):**
 
-End-to-end onboarding flow. Walks the full `/start` funnel:
+| Fixture | Domain | Email | Notes |
+|---|---|---|---|
+| `staytrue` (default) | `staytruetattoopa.com` | `test+staytruetattoopa@gmail.com` | GMB-enabled — exercises the GMB Offers Agent. Real Instagram-URL regression coverage (D-2026-07-03b) and a real workspace-photo upload so `TRIAL_RESULT` shows a real generated image. |
+| `colono` | `https://www.colonoconstruccion.com/` | `test+colonoconstruccion@gmail.com` | Spanish-language construction business — different GMB category/enrichment profile. |
+| `roccos` | `https://roccospizzacollegeville.com/` | `test+roccospizza@gmail.com` | Restaurant/food-service business — a third distinct GMB category, prevents over-fitting to one business type. |
 
-1. Landing page → CTA click → anonymous session
-2. Domain entry → enrichment (up to 45s)
-3. GMB check — waits for "Generate My Post" button; logs whether business was found on Maps
-4. Business step — reports prefilled name, location, industry; clicks Continue
-5. Profile Builder — three cards (Next / Next / Continue) with Turnstile failsafe
-6. Photo Upload — skips if shown
-7. Generating — waits up to 60s for result, turnstile-block, or error
-8. If result: claim account → `/generate` post check
+Consolidated 2026-08-23 (`decisions.md` D-2026-08-23c/d) from four near-identical scripts —
+this file plus `onboard-01-staytrue`/`onboard-02-colono`/`onboard-03-roccos`, each a hand-copied
+onboarding-regression fixture around the same `_shared/onboard-flow.cjs` entry point. The old
+per-script email-based teardown could never find/delete a test session that failed before
+`claimAccount()` ran (no email to look up by) — root-caused as the source of ~94 orphaned
+anonymous test sessions swept into real Outscraper spend by the weekly discovery cron. Fixed by
+capturing the anonymous session's own id straight out of the browser (before waiting on the
+onboarding outcome) and using that as the teardown fallback regardless of how far the run got.
 
-**Pass/fail:** generation outcome is `turnstile-block` or `result` (both PASS in headless — Turnstile cannot solve headlessly); `error` is a FAIL.
+**`--onboarding-only`** stops after claim + business-profile verification + a `/generate` smoke
+check — this is the old `onboard-01/02/03` scope (free-trial signup → onboard → claim → smoke
+check, no autonomous pipeline touched). Omit it for the full autonomous-pipeline run described
+in the Scripts table above.
 
----
-
-### onboard-02-colono
-
-**Screenshots:** `/tmp/pg-colono-shots/`
-**Test URL:** `https://www.colonoconstruccion.com/`
-**Credentials:** `test+colonoconstruccion@gmail.com` / `TestPass123!`
-**Viewport:** 390×844 (iPhone 14 Pro)
-
-Extended onboarding test for a Spanish-language construction business. Same funnel as `onboard-01-staytrue` plus:
-
-- **Step 0 — Direct enrichment API call:** Before launching the browser, fires `business-enrichment` directly and prints every field with its value, clearly flagging missing ones.
-- **Step 5 — Full field audit:** Reports all five business form fields (name, location, industry, phone, website) individually with `⚠ empty` markers for anything unpopulated.
-
-Use this script when testing a new category of business (non-English sites, international addresses, GMB-sparse industries) to validate that the enrichment merge is working correctly.
-
----
-
-### onboard-03-roccos
-
-**Screenshots:** `/tmp/pg-roccos-shots/`
-**Test URL:** `https://roccospizzacollegeville.com/`
-**Credentials:** `test+roccospizza@gmail.com` / `TestPass123!`
-**Viewport:** 390×844 (iPhone 14 Pro)
-
-Same structure as `onboard-02-colono`. Uses Rocco's Pizza in Collegeville PA — a restaurant/food-service business providing a different GMB category and enrichment profile than the tattoo studio and construction site. Theme prompt for `/generate` post check: `"weekend special happy hour deal"`.
-
-Alternating between StayTrue and Rocco's as the "quick" onboarding test prevents over-fitting to a single business type.
+**Pass/fail:** generation outcome must be `result` — a `pipeline-fail`/timeout/error logs a
+warning and stops the run (teardown still fires either way).
 
 ---
 
