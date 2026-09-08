@@ -1785,6 +1785,19 @@ coverage: `business-name`/`business-location`/`business-industry` (`components/p
 
 ---
 
+## PostHog Weekly Findings Digest (postglider-auto, 2026-09-08)
+
+Full detail lives in `admin/posthog.mdx` §4 — this entry is here so the cron itself shows up in
+the operational cadence inventory, per this doc's own routing convention.
+
+| | |
+|---|---|
+| **Cron endpoint** | `app/api/cron/posthog-weekly-digest/route.ts` |
+| **Schedule** | Cloud Scheduler job `postglider-posthog-weekly-digest`, Mondays 9am UTC |
+| **What it does** | Queries PostHog (HogQL) for the trailing 7 days — `$exception` count/top messages, `$rageclick`/`$dead_click` counts, p75 Web Vitals, session-replay volume — emails the summary via Loops (`OPS_POSTHOG_WEEKLY_DIGEST`) to kenlyle@gmail.com + mike@postglider.com |
+| **Env vars** | `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID` (see Environment Variables Reference below) |
+| **Manual trigger** | `curl -H "Authorization: Bearer $CRON_SECRET" https://postglider-autonomous-<project>.us-central1.run.app/api/cron/posthog-weekly-digest` — **sends a real email each time**, see the warning in `posthog.mdx` §4 |
+
 ## Environment Variables Reference
 
 | Variable | Used by |
@@ -1801,3 +1814,5 @@ coverage: `business-name`/`business-location`/`business-industry` (`components/p
 | `APIFY_API_KEY` | `engagement-refresh` cron — Apify actor scraping for post metrics |
 | `GOOGLE_PLACES_API_KEY` | Competitor Finder, Local Partners discovery — Google Places Text Search |
 | `PEXELS_API_KEY` | Local Expert Agent — real local-scene photo fallback (Wikimedia Commons is primary, no key needed) |
+| `POSTHOG_PERSONAL_API_KEY` | `posthog-weekly-digest` cron — HogQL query access (`query:read` scope) |
+| `POSTHOG_PROJECT_ID` | `posthog-weekly-digest` cron — numeric PostHog project ID |
