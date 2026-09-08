@@ -1,8 +1,8 @@
 ---
 title: "PostHog — Admin Guide"
-description: "How PostHog is used in PostGlider: session recordings, conversion funnels, and canary feature flags. What it is not used for."
+description: "How PostHog is used in PostGlider: session recordings, conversion funnels, canary feature flags, and the weekly findings digest. What it is not used for."
 visibility: internal
-verified_against_commit: cba0315
+verified_against_commit: 8014f128
 ---
 
 ## What PostHog is (and isn't) for in PostGlider
@@ -10,9 +10,11 @@ verified_against_commit: cba0315
 PostHog is an **internal product analytics tool**. It helps the PostGlider team understand how the app is being used, where users drop off, and whether new features are working. It is **not** a user-facing reporting tool — users cannot log into PostHog to see their own data.
 
 **PostHog is used for:**
-- Session recordings
+- Session recordings (off by default — turned on in the dashboard only for active troubleshooting, see §5)
 - Conversion funnels
 - Feature flag management for canary rollouts
+- Web Vitals (real-user LCP/INP/CLS/FCP field data)
+- A weekly automated findings digest emailed to the team (§4)
 
 **PostHog is not used for:**
 - User billing statements (those live in `/settings` → Credit Usage, backed by `credit_usage_log` and `image_gen_provenance`)
@@ -31,10 +33,18 @@ capture_pageview: false              — pageviews are fired manually on route c
 ```
 
 Required environment variables:
-- `NEXT_PUBLIC_POSTHOG_KEY` — project API key from posthog.com
+- `NEXT_PUBLIC_POSTHOG_KEY` — the **public** Project API key (`phc_...`) from posthog.com Project Settings. Lives in `.env.production` (committed — it's a public key, not a secret) per this repo's Cloud Run deployment rules.
 - `NEXT_PUBLIC_POSTHOG_HOST` — defaults to `https://app.posthog.com`; set to your EU Cloud URL if needed
 
 All instrumentation calls go through `lib/analytics.ts`. **Never call `posthog.capture()` directly** — use `track()` or the typed helpers in `Analytics.*` so the event taxonomy stays consistent.
+
+<Callout kind="warning">
+**Incident, 2026-09-08**: `NEXT_PUBLIC_POSTHOG_KEY` was missing from `.env.production` entirely — `posthog.init()`'s own guard (`if (!process.env.NEXT_PUBLIC_POSTHOG_KEY) return;`) silently no-op'd on every page load, so **no PostHog data of any kind (events, replay, Web Vitals) reached production** for an unknown period. Confirmed live via real network capture and a HogQL query returning `count()=0` project-wide. Fixed by adding the real public key back. If PostHog ever looks suspiciously empty again, check this env var against the deployed build *first* — `gcloud run services describe` for server vars won't catch it, since `NEXT_PUBLIC_*` vars are baked into the client bundle at build time, not read at Cloud Run runtime.
+</Callout>
+
+<Callout kind="info">
+**Automated/QA browser traffic never shows up in PostHog.** PostHog's bot filter silently drops all capture when `navigator.webdriver === true` (or `HeadlessChrome` appears in the user agent) — every Playwright-launched Chromium instance sets this, headed or headless, with no way to avoid it without deliberately spoofing the signal. This means every e2e/QA script in this repo (`scripts/e2e-generate.cjs`, `view-as-mike.cjs`, `admin-reset-usage.cjs`, etc.) is invisible to PostHog. **To verify anything actually reached PostHog, you must use a real, human-driven browser session** — not a script, even a headed one launched by Playwright.
+</Callout>
 
 ---
 
@@ -136,6 +146,36 @@ await ph.shutdown();
 | Per-transaction image audit | `image_gen_provenance` table in Supabase |
 | Operational credit queries | Supabase SQL Editor |
 | User-visible spend reporting | Already built — see `/api/usage/credits` and `/api/usage/transactions` |
-| Error tracking | Vercel Functions logs + `app_errors` table |
+| Error tracking | Cloud Run logs (`gcloud logging read`) + `app_errors` table. PostHog's own `$exception` events (surfaced in the weekly digest, §4 below) are a useful cross-check but not the source of truth. |
 
 PostHog events add overhead (a network call per event). Only instrument events where the analytics question is worth the cost. The existing `Analytics.*` helpers cover the main product flows — add new events when you have a specific question to answer, not just to log everything.
+
+---
+
+## 4. Weekly Findings Digest
+
+**What it is:** `GET /api/cron/posthog-weekly-digest`, run every Monday 9am UTC by the Cloud Scheduler job `postglider-posthog-weekly-digest`. Queries PostHog via HogQL for the past 7 days — `$exception` count + top messages, `$rageclick`/`$dead_click` counts, p75 Web Vitals (LCP/INP/CLS/FCP), and session-replay volume — and emails the summary to kenlyle@gmail.com and mike@postglider.com via a Loops transactional template (`OPS_POSTHOG_WEEKLY_DIGEST`).
+
+**Requires** (server-side, Secret Manager-backed on Cloud Run — separate from the client-side `NEXT_PUBLIC_POSTHOG_KEY` above):
+- `POSTHOG_PERSONAL_API_KEY` — a Personal API Key (not a Project API Key) from posthog.com Settings → Personal API Keys, with `query:read` scope
+- `POSTHOG_PROJECT_ID` — the numeric project ID (visible in the PostHog dashboard URL, `app.posthog.com/project/<ID>/...`)
+
+**Query logic:** `lib/monitoring/posthogQuery.ts` (thin HogQL wrapper, fails soft) + the route itself. Two non-obvious HogQL gotchas, found and fixed 2026-09-08:
+- `session_replay_events`' timestamp columns are `start_time`/`end_time` — not `min_first_timestamp`/`max_last_timestamp`, which don't exist and error out.
+- A bare `count() ... WHERE start_time > X` against `session_replay_events` collapses the **entire table** into one implicit aggregate row (comparing X against the all-time-earliest session ever recorded, not per-session) instead of grouping per `session_id` — silently returns 0 even when real recordings exist. Must explicitly `GROUP BY session_id` in a subquery.
+
+**To rebuild the email template** if it's ever deleted/needs changes: `node build-posthog-digest-email.mjs` (repo root) — same create→draft-with-LMX→publish pattern as `build-missing-loops-emails.mjs`.
+
+<Callout kind="warning">
+Manually re-triggering this route (e.g. `curl` with `CRON_SECRET`) sends a **real email** to both recipients every time. When iterating on the query logic, either accept that cost or temporarily point `RECIPIENTS` in the route at a throwaway address instead of re-running against the real distribution list repeatedly.
+</Callout>
+
+---
+
+## 5. Session Recording & Web Vitals — dashboard toggles, not code
+
+Both **session replay** ("Record user sessions") and **Web Vitals autocapture** are controlled from the PostHog project dashboard (Settings → Recordings / Autocapture) — not by any flag in this codebase. `app/providers/PostHogProvider.tsx` explicitly declares `disable_session_recording: false` and `session_recording: { maskAllInputs: true }` for visibility, but the dashboard setting is what actually gates whether recording happens.
+
+**Recommended posture:** leave session recording **off** by default, and only turn it on in the dashboard for an active troubleshooting window (e.g. reproducing a specific customer-reported bug), then turn it back off. Web Vitals autocapture carries none of session recording's privacy tradeoff (no DOM/PII, just timing numbers) and is safe to leave on continuously — it's the actual source of the Weekly Digest's Web Vitals numbers.
+
+**Masking:** form inputs (text/password/email fields) are always masked via `maskAllInputs: true`, regardless of the dashboard setting. Rendered (non-input) text or elements that need masking should get the `ph-mask` class; anything that must never be captured at all gets `ph-no-capture`.
