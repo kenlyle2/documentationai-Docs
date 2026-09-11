@@ -634,7 +634,7 @@ Two features added 2026-09-11 to the entrypoint itself:
 | Job | Script | Schedule (UTC) | What it proves |
 |---|---|---|---|
 | `postglider-auto-test-runner` | `chaos-onboarding-walkthrough.cjs` | `0 13 * * *` (still daily as of this writing — candidate to move to this tier, not yet decided) | Every dashboard onboarding-checklist link navigates somewhere real; deliberate careless-user mutation testing on a real profile. |
-| `postglider-auto-test-runner-billing` | `billing-02-charge-atomic.cjs` | `0 15 * * 1,3,5` | Real `charge_credits_atomic` RPC contract: accumulation, cycle-rollover, pricing-formula coherence, idempotency. **Its very first scheduled run (2026-09-11) found two real, live regressions** — see "Known live findings" below. |
+| `postglider-auto-test-runner-billing` | `billing-02-charge-atomic.cjs` | `0 15 * * 1,3,5` | Real `charge_credits_atomic` RPC contract: accumulation, cycle-rollover, pricing-formula coherence, idempotency. **Its very first scheduled run (2026-09-11) surfaced 2 failures that traced to a test-fixture issue, not a real bug** — see "Known live findings" below. Needs a non-admin fixture account. |
 | `postglider-auto-test-runner-onboarding-e2e` | `app-17-COLD-free-trial-e2e.cjs --onboarding-only` | `30 15 * * 2,4,6` | The single most comprehensive onboarding test in the repo: free-trial signup → business enrichment → Instagram step → claim → `/generate` smoke check, against a fake fixture business (not a real customer). |
 
 **Weekly** (unchanged, pre-existing): `postglider-auto-test-runner-fuzzer`
@@ -678,19 +678,22 @@ values set, Guardian-checked clean.
 full schema, which has no `status` field. Until that click happens, the workflow sits built and
 tested but not actually sending.
 
-### Known live findings — real regressions the suite has already caught
+### Known live findings
 
-**`billing-02-charge-atomic`'s very first scheduled run (2026-09-11, Friday 15:00 UTC) found two
-real, live failures**, not test-harness noise:
-1. `current_cycle_start` is not being written back on cycle rollover — the test account's value
-   (`2026-08-17`) is stale, "before this month."
-2. `monthly_limit` from the RPC returns `999999` instead of the formula-derived `585` — looks like
-   an "unlimited" sentinel value is in play somewhere for this account, not simply a stale
-   hardcoded `750` (the original B3 bug this test was written to catch).
-
-Not yet root-caused or fixed as of this writing — flagged here, and will surface again in the
-daily Loops digest once published, so it can't quietly disappear. Check `research/decisions.md`
-for the follow-up entry once investigated.
+**`billing-02-charge-atomic`'s very first scheduled run (2026-09-11, Friday 15:00 UTC) reported
+two failures — traced immediately after, and NOT a real regression.** Both failures
+(`current_cycle_start` not written back; `monthly_limit` returning `999999` instead of the
+formula-derived `585`) turned out to be the same single, correct, intentional cause: the test
+account (`kenlyle+2@gmail.com`) has `profiles.is_admin = true`, and `charge_credits_atomic`'s own
+"ADMIN BYPASS" branch (`supabase/migrations/20260622002000_charge_credits_atomic_general_anchor.sql`
+line ~125 — confirmed against the live, currently-deployed function, not an old migration)
+deliberately tracks usage but skips the normal cycle-rollover write-back and always returns the
+`999999` sentinel for an admin account, by design. The test itself is exercising a real,
+intentional code path — it's just the wrong path for what this test is trying to verify. **Real
+follow-up, not yet done:** either point this test at a non-admin fixture account, or have it
+detect and explicitly skip/flag the admin-bypass branch instead of asserting against it. Left as
+a known false-positive in the digest until fixed — check `research/decisions.md` D-2026-09-11a
+for the investigation trail.
 
 **The `daily-quality-check` run that prompted re-verifying this whole suite (2026-09-11) also
 found a real gap**: the test account's RobinReach brand has a live Instagram connection but zero
