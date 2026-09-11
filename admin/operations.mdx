@@ -634,33 +634,40 @@ for — nobody has to remember to click anything.
 - **3pm UTC** — scans for a specific known data-integrity issue (an anonymous trial session that
   got split from a real paid account, orphaning a social connection).
 
-### Gaps found doing this review — not yet fixed, worth knowing about
+### Gaps found doing this review — all 5 closed same day (2026-09-11)
 
-Writing the plain-English version above is what surfaced these — they're real, not hypothetical:
+Writing the plain-English version above is what surfaced these. Ken: "Attack those 5 issues now
+in order, please." All fixed within hours — each one turned up a genuine additional bug along
+the way, not just the fix originally scoped:
 
-1. **The billing test isn't actually testing the customer billing path.** As noted above, the
-   account it uses is an admin account, which bypasses the normal charge/limit logic entirely
-   (confirmed in the live database function, not assumed). Until this is fixed with a non-admin
-   test account, **the actual credit-charging code every paying customer hits has zero automated
-   coverage.** This is the single most important gap this review found.
-2. **A job that fails to even start reports nothing.** The daily email is built from what each
-   job successfully tells the database when it finishes. If a job can't start at all (a
-   permissions problem, Google having an outage), it never gets that far — so silence from a
-   scheduled job isn't proof everything's fine, it just means nothing was heard from. Worth a
-   periodic manual glance at Cloud Scheduler's own dashboard, not just trusting the inbox.
-3. **No fast "is the site even up" check exists separately from the heavy 4pm test.** The 4pm
-   run takes 10-15 minutes end-to-end; if the site were fully down, we'd only find out at 4pm (or
-   whenever someone happens to visit it) rather than within a minute or two of it happening.
-4. **Social account connection health (expiring tokens) isn't on any schedule.** A script for
-   this already exists (`social-03-token-health.cjs`) but currently only runs when a person
-   remembers to run it by hand.
-5. **The fast, free correctness checks (`vitest` — pure math tests for billing/batch-size
-   formulas) don't run on any schedule either**, only when someone runs them locally. These are
-   the cheapest possible tests to run (no browser, no real API calls, seconds not minutes) and
-   currently get the least automated attention of anything in the suite.
+1. ✅ **Fixed — the billing test wasn't testing the customer billing path.** The account it used
+   had admin privileges, which bypasses the normal charge/limit logic entirely. Built a dedicated
+   non-admin test account. Along the way, found the test's own expected math was ALSO wrong — a
+   real pricing change from 7 weeks earlier had never been reflected in it. Both fixed;
+   **the real customer billing path now has real, passing automated coverage for the first time.**
+2. ✅ **Fixed — and it caught something real on its very first run.** The daily digest now
+   checks "did every job that should have run today actually report in," not just "did any
+   reported failures happen." The very first time this ran, it found the 4pm daily check's
+   scheduled trigger had a permissions problem and had **never successfully fired on its own
+   schedule** — every prior "it's working" belief about that job was based on manual test runs,
+   not the actual daily cron. Fixed immediately.
+3. ✅ **Fixed — a new check runs every 15 minutes** confirming the site and database are both
+   reachable, independent of the heavy 10-15-minute daily test.
+4. ✅ **Turned out not to be a real gap.** The token-expiry script checked a database table that
+   turned out to be completely empty and unused — the social-media connections it was built to
+   watch had already moved to a different vendor (RobinReach) that manages its own token refresh
+   internally. Retired the script rather than scheduling a check that would always report "all
+   clear" without actually checking anything real.
+5. ✅ **Fixed — the fast unit-math tests now run daily too.** Getting there surfaced three real
+   technical snags (a Node.js version incompatibility, a missing reporting step, a missing
+   security-certificate package) — all found and fixed before anything went live, verified by
+   actually running it, not assumed to work.
 
-None of these are fixed yet — flagging them here so they don't quietly disappear, the same reason
-the Canva-watermark gap sat unfound for 8 months.
+**Bonus, found once a real email actually arrived:** the digest email itself had a real
+formatting bug — the daily counts showed correctly, but the detailed summary text underneath each
+one showed the raw placeholder text instead of the real content. Root cause: one specific way of
+formatting the email content doesn't fill in live data at all, silently. Fixed and verified with
+a real test send before turning the automation back on.
 
 ### Architecture
 
@@ -691,6 +698,20 @@ Two features added 2026-09-11 to the entrypoint itself:
    (never fails the job itself over a reporting hiccup). This is what the daily digest (below)
    reads from.
 
+**One job is structurally different — `postglider-auto-test-runner-vitest`.** `vitest` needs the
+full `lib/`+`hooks/` source tree and `node_modules`, which can't be fetched-fresh like a single
+script — it has its own dedicated image (`Dockerfile.vitest-runner`, `node:22-bookworm-slim` —
+Node 20 has a real incompatibility with this repo's jsdom/undici versions, found and fixed
+2026-09-11) with its own `entrypoint.vitest-runner.sh` mirroring the same reporting step. **This
+image does NOT auto-pick-up new commits** — rebuild it manually whenever a vitest test file or
+the code it tests changes:
+```bash
+cd postglider-auto
+gcloud builds submit --config /tmp/cloudbuild-vitest-runner.yaml --project=postglider-prod .
+gcloud run jobs update postglider-auto-test-runner-vitest --region=us-central1 --image=us-central1-docker.pkg.dev/postglider-prod/cloud-run-source-deploy/postglider-auto-vitest-runner:<next-tag>
+```
+(the `cloudbuild.yaml` referenced there just runs `docker build -f Dockerfile.vitest-runner -t ... .` — recreate it if not present locally.) No push-triggered auto-rebuild is wired yet.
+
 ### Scheduled jobs, by tier
 
 **Critical** (daily — proves the core pipeline and vendor dependencies are alive):
@@ -699,14 +720,16 @@ Two features added 2026-09-11 to the entrypoint itself:
 |---|---|---|---|
 | `postglider-auto-daily-quality-check` | `daily-quality-check.cjs` | `0 16 * * *` | Real generate → schedule → publish (live to Facebook + Instagram) → real production defect-check against the actual published image. Post 3 of every run uses **the customer's actual incident image** as a permanent regression fixture for the crop/watermark bug that started all this. |
 | `postglider-auto-test-runner-vendor-balances` | `check-vendor-balances.cjs` | `0 12 * * *` | Gemini, OpenAI, Anthropic, and Replicate API keys are all still valid and answering. Honest limitation: none of these vendors expose a true prepaid-balance API for a standard key (all four are postpaid to a card) — this checks key health (a cheap live call; 401/403 = FAIL, 429/5xx = WARN), not a dollar figure, and says so explicitly in its own output. |
-| `postglider-auto-test-runner-digest` | `send-test-suite-digest.cjs` | `30 17 * * *` | Not a test itself — reads everything the other jobs reported to `test_suite_runs` since the last run and fires the Loops digest (below). Scheduled last, after the 16:00 UTC quality check finishes. |
+| `postglider-auto-test-runner-heartbeat` | `check-site-heartbeat.cjs` | `*/15 * * * *` | Fast independent uptime + DB-reachability check (gap #3, closed 2026-09-11) — hits the real public `/api/autonomous/status` endpoint, needs zero secrets. Runs every 15 minutes so an outage is caught in minutes, not only whenever the 4pm test happens to run. |
+| `postglider-auto-test-runner-vitest` | `vitest run lib hooks` (own dedicated image, `Dockerfile.vitest-runner`) | `0 11 * * *` | The full `vitest` unit suite (gap #5, closed 2026-09-11) — pure billing/batch-size math, no browser, no billed API calls, seconds not minutes. **Unlike every other job, this image bakes in the source tree at build time and does NOT auto-pick-up new commits** — must be manually rebuilt when a test file or the code it tests changes (see "Architecture" below for the command). |
+| `postglider-auto-test-runner-digest` | `send-test-suite-digest.cjs` | `30 17 * * *` | Not a test itself — reads everything the other jobs reported to `test_suite_runs` since the last run and fires the Loops digest (below), including any expected job that never reported at all. Scheduled last, after the 16:00 UTC quality check finishes. |
 
 **Important** (Mon/Wed/Fri or Tue/Thu/Sat — real coverage, lower urgency than daily):
 
 | Job | Script | Schedule (UTC) | What it proves |
 |---|---|---|---|
 | `postglider-auto-test-runner` | `chaos-onboarding-walkthrough.cjs` | `0 13 * * *` (still daily as of this writing — candidate to move to this tier, not yet decided) | Every dashboard onboarding-checklist link navigates somewhere real; deliberate careless-user mutation testing on a real profile. |
-| `postglider-auto-test-runner-billing` | `billing-02-charge-atomic.cjs` | `0 15 * * 1,3,5` | Real `charge_credits_atomic` RPC contract: accumulation, cycle-rollover, pricing-formula coherence, idempotency. **Its very first scheduled run (2026-09-11) surfaced 2 failures that traced to a test-fixture issue, not a real bug** — see "Known live findings" below. Needs a non-admin fixture account. |
+| `postglider-auto-test-runner-billing` | `billing-02-charge-atomic.cjs` | `0 15 * * 1,3,5` | Real `charge_credits_atomic` RPC contract: accumulation, cycle-rollover, pricing-formula coherence, idempotency. **Fixed 2026-09-11** — now runs against a dedicated non-admin fixture account (`kenlyle+billingtest@gmail.com`) and asserts the current (not stale) pricing formula. 10/10 pass against the real customer billing path. |
 | `postglider-auto-test-runner-onboarding-e2e` | `app-17-COLD-free-trial-e2e.cjs --onboarding-only` | `30 15 * * 2,4,6` | The single most comprehensive onboarding test in the repo: free-trial signup → business enrichment → Instagram step → claim → `/generate` smoke check, against a fake fixture business (not a real customer). |
 
 **Weekly** (unchanged, pre-existing): `postglider-auto-test-runner-fuzzer`
