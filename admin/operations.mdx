@@ -702,15 +702,25 @@ Two features added 2026-09-11 to the entrypoint itself:
 full `lib/`+`hooks/` source tree and `node_modules`, which can't be fetched-fresh like a single
 script — it has its own dedicated image (`Dockerfile.vitest-runner`, `node:22-bookworm-slim` —
 Node 20 has a real incompatibility with this repo's jsdom/undici versions, found and fixed
-2026-09-11) with its own `entrypoint.vitest-runner.sh` mirroring the same reporting step. **This
-image does NOT auto-pick-up new commits** — rebuild it manually whenever a vitest test file or
-the code it tests changes:
+2026-09-11) with its own `entrypoint.vitest-runner.sh` mirroring the same reporting step.
+
+**Auto-rebuild is wired** (2026-09-11) via a dedicated Cloud Build trigger
+(`postglider-auto-vitest-runner-rebuild`, on the same GitHub connection the main app's own
+push-trigger uses), scoped with `--included-files` to only fire on a push touching `lib/**`,
+`hooks/**`, `vitest.config.mts`, `package.json`, `package-lock.json`, `Dockerfile.vitest-runner`,
+or `entrypoint.vitest-runner.sh` — not every unrelated commit. It runs
+`cloudbuild.vitest-runner.yaml` (checked into the repo, mirrors the main app's own
+build→push→deploy pattern): build → push to Artifact Registry tagged `$SHORT_SHA` → `gcloud run
+jobs update --image` (Cloud Run Jobs have no `deploy` subcommand the way Services do). **Verified
+live, twice**: two real pushes each produced a real build and a real job update to that exact
+commit's image tag, confirmed via `gcloud run jobs describe ...  --format='value(...image)'`
+matching the push's short SHA both times — no manual step involved.
+
+Manual rebuild (only needed if the trigger itself ever needs bypassing):
 ```bash
 cd postglider-auto
-gcloud builds submit --config /tmp/cloudbuild-vitest-runner.yaml --project=postglider-prod .
-gcloud run jobs update postglider-auto-test-runner-vitest --region=us-central1 --image=us-central1-docker.pkg.dev/postglider-prod/cloud-run-source-deploy/postglider-auto-vitest-runner:<next-tag>
+gcloud builds submit --config cloudbuild.vitest-runner.yaml --project=postglider-prod .
 ```
-(the `cloudbuild.yaml` referenced there just runs `docker build -f Dockerfile.vitest-runner -t ... .` — recreate it if not present locally.) No push-triggered auto-rebuild is wired yet.
 
 ### Scheduled jobs, by tier
 
