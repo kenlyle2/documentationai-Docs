@@ -588,7 +588,79 @@ own Canva watermark already on it) got cropped wrong AND double-branded with our
 top, live on his Instagram, with zero automated coverage catching it — "That testing gap 8 months
 into the project is an absolute disgrace." This section is the actual, provable answer: what runs
 on a schedule today, how results reach a human inbox, and exactly what still needs a real person
-(you) to do something (an OAuth click, a Loops "Publish" button) that no API can do for us.
+(you) to do something (an OAuth click, clicking "Start" on a Loops workflow) that no API can do
+for us.
+
+### Plain-English summary — what's tested, how often, and what isn't yet
+
+No jargon version, for anyone who wants to know "is this actually working" without reading Cloud
+Run job specs. Everything below runs automatically, unattended, every single day it's scheduled
+for — nobody has to remember to click anything.
+
+**Every day:**
+- **Noon UTC** — checks that our accounts with Google (Gemini), OpenAI, Anthropic (Claude), and
+  Replicate are all still valid and none of them have been shut off, revoked, or are erroring.
+  This doesn't check dollar balances (none of these four companies actually expose that for a
+  normal account — they all bill our card monthly, there's no "prepaid balance" to check), but it
+  does catch "this vendor stopped working" the moment it happens, not days later.
+- **1pm UTC** — pretends to be a brand-new user clicking through the onboarding checklist on the
+  dashboard, and separately does some deliberately careless things to a real test profile (maxes
+  out sliders, deletes and re-adds things) to make sure the app doesn't break under sloppy real
+  human use.
+- **4pm UTC** — the big one. Generates a real post, schedules it, actually publishes it live to
+  real Facebook and Instagram test accounts, then runs our real AI defect-checker against the
+  actual published image. One of the three posts in every run **uses the exact photo from Mike's
+  incident** as a permanent fixture — this is the test that would have caught the original bug
+  that started all of this.
+- **5:30pm UTC** — not a test itself. Collects everything the day's tests reported and emails you
+  one summary, worst news first ("Urgent" → "Prioritized" → "Notices"), via the new Loops
+  automation.
+
+**Three times a week (alternating, so something real runs almost every day):**
+- **Mon/Wed/Fri, 3pm UTC** — checks the credit/billing math directly against the database
+  (does charging credits actually add up correctly, does the monthly reset happen on time, are
+  duplicate charges blocked). **Known limitation, not yet fixed:** the account this test uses is
+  an admin account, which skips the normal billing rules entirely — so right now this test is
+  quietly checking the admin path, not the real customer path. See the correction below.
+- **Tue/Thu/Sat, 3:30pm UTC** — runs an entire fake signup from scratch: a made-up business signs
+  up for a free trial, goes through onboarding, gets a real AI-generated post, and claims their
+  account. This is the closest thing to "a stranger tries PostGlider for the first time," done
+  automatically, three times a week.
+
+**Once a week (Sunday):**
+- **2pm UTC** — a randomized "monkey test": ~300 semi-random real actions across the app (never
+  anything destructive like deleting an account or making a real payment), looking for anything
+  that breaks under unpredictable use.
+- **3pm UTC** — scans for a specific known data-integrity issue (an anonymous trial session that
+  got split from a real paid account, orphaning a social connection).
+
+### Gaps found doing this review — not yet fixed, worth knowing about
+
+Writing the plain-English version above is what surfaced these — they're real, not hypothetical:
+
+1. **The billing test isn't actually testing the customer billing path.** As noted above, the
+   account it uses is an admin account, which bypasses the normal charge/limit logic entirely
+   (confirmed in the live database function, not assumed). Until this is fixed with a non-admin
+   test account, **the actual credit-charging code every paying customer hits has zero automated
+   coverage.** This is the single most important gap this review found.
+2. **A job that fails to even start reports nothing.** The daily email is built from what each
+   job successfully tells the database when it finishes. If a job can't start at all (a
+   permissions problem, Google having an outage), it never gets that far — so silence from a
+   scheduled job isn't proof everything's fine, it just means nothing was heard from. Worth a
+   periodic manual glance at Cloud Scheduler's own dashboard, not just trusting the inbox.
+3. **No fast "is the site even up" check exists separately from the heavy 4pm test.** The 4pm
+   run takes 10-15 minutes end-to-end; if the site were fully down, we'd only find out at 4pm (or
+   whenever someone happens to visit it) rather than within a minute or two of it happening.
+4. **Social account connection health (expiring tokens) isn't on any schedule.** A script for
+   this already exists (`social-03-token-health.cjs`) but currently only runs when a person
+   remembers to run it by hand.
+5. **The fast, free correctness checks (`vitest` — pure math tests for billing/batch-size
+   formulas) don't run on any schedule either**, only when someone runs them locally. These are
+   the cheapest possible tests to run (no browser, no real API calls, seconds not minutes) and
+   currently get the least automated attention of anything in the suite.
+
+None of these are fixed yet — flagging them here so they don't quietly disappear, the same reason
+the Canva-watermark gap sat unfound for 8 months.
 
 ### Architecture
 
@@ -673,10 +745,10 @@ ever), one email action rendering Urgent → Prioritized → Notices in that ord
 values set, Guardian-checked clean.
 
 **One step the API cannot do — you have to click it:** open the workflow link above and click
-**Publish**. Loops' API can build and edit a workflow's graph and content, but activating it
-(`Draft` → live) has no exposed endpoint — confirmed by inspecting `updateWorkflowProperties`'s
-full schema, which has no `status` field. Until that click happens, the workflow sits built and
-tested but not actually sending.
+**Start** (the button is labeled "Start" in the Loops UI, not "Publish" — done 2026-09-11). Loops'
+API can build and edit a workflow's graph and content, but activating it (`Draft` → live) has no
+exposed endpoint — confirmed by inspecting `updateWorkflowProperties`'s full schema, which has no
+`status` field.
 
 ### Known live findings
 
