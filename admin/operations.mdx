@@ -581,6 +581,136 @@ need its own `GH_TOKEN` when that fast-follow lands). Full build/verification wr
 
 ---
 
+## Automated Test Suite — Scheduled Cloud Run Jobs + Daily Digest
+
+Built 2026-09-11 after a real production embarrassment: a customer's own uploaded flyer (with his
+own Canva watermark already on it) got cropped wrong AND double-branded with our own wordmark on
+top, live on his Instagram, with zero automated coverage catching it — "That testing gap 8 months
+into the project is an absolute disgrace." This section is the actual, provable answer: what runs
+on a schedule today, how results reach a human inbox, and exactly what still needs a real person
+(you) to do something (an OAuth click, a Loops "Publish" button) that no API can do for us.
+
+### Architecture
+
+All scheduled tests share ONE generic Cloud Run Job image
+(`postglider-auto-test-runner`, `us-central1-docker.pkg.dev/postglider-prod/cloud-run-source-deploy/postglider-auto-test-runner`)
+behind **one dedicated Cloud Run Job per scheduled script** — not one job with per-invocation
+overrides (that design was tried and abandoned, see `pg-admin/CLAUDE.md`). The entrypoint
+(`pg-admin/entrypoint.postglider-auto-test-runner.sh`) fetches the target script fresh via
+GitHub's raw-content API at execution time — no image rebuild needed when a test script changes,
+only when the base Node/Playwright image itself changes.
+
+**⚠ Real trap, already hit once — don't repeat it:** this image has TWO Dockerfiles in the
+`pg-admin` repo (`Dockerfile` for an unrelated service, `Dockerfile.postglider-auto-test-runner`
+for this one). `gcloud builds submit --tag ... .` silently picks the DEFAULT `Dockerfile`, not the
+named one — the current live tag is `:v3`, built correctly via an explicit
+`--config` pointing at a `cloudbuild.yaml` with `-f Dockerfile.postglider-auto-test-runner`. The
+`:v2` tag exists in the registry and is the WRONG image (a different service entirely) — never
+reference it for any job in this family.
+
+Two features added 2026-09-11 to the entrypoint itself:
+
+1. **`EXTRA_FILES`** (job env var, comma-separated repo-relative paths) — fetches sibling files a
+   target script `require()`s by relative path, so a genuinely multi-file script doesn't need its
+   shared helpers hand-inlined into a second, driftable copy. Example: the onboarding e2e job
+   below sets `EXTRA_FILES=scripts/_shared/onboard-flow.cjs,scripts/_shared/testenv.cjs`.
+2. **Automatic reporting** — after every run, the entrypoint POSTs the result (job name, tier,
+   exit code, source commit, timestamps) to a new `public.test_suite_runs` table, best-effort
+   (never fails the job itself over a reporting hiccup). This is what the daily digest (below)
+   reads from.
+
+### Scheduled jobs, by tier
+
+**Critical** (daily — proves the core pipeline and vendor dependencies are alive):
+
+| Job | Script | Schedule (UTC) | What it proves |
+|---|---|---|---|
+| `postglider-auto-daily-quality-check` | `daily-quality-check.cjs` | `0 16 * * *` | Real generate → schedule → publish (live to Facebook + Instagram) → real production defect-check against the actual published image. Post 3 of every run uses **the customer's actual incident image** as a permanent regression fixture for the crop/watermark bug that started all this. |
+| `postglider-auto-test-runner-vendor-balances` | `check-vendor-balances.cjs` | `0 12 * * *` | Gemini, OpenAI, Anthropic, and Replicate API keys are all still valid and answering. Honest limitation: none of these vendors expose a true prepaid-balance API for a standard key (all four are postpaid to a card) — this checks key health (a cheap live call; 401/403 = FAIL, 429/5xx = WARN), not a dollar figure, and says so explicitly in its own output. |
+| `postglider-auto-test-runner-digest` | `send-test-suite-digest.cjs` | `30 17 * * *` | Not a test itself — reads everything the other jobs reported to `test_suite_runs` since the last run and fires the Loops digest (below). Scheduled last, after the 16:00 UTC quality check finishes. |
+
+**Important** (Mon/Wed/Fri or Tue/Thu/Sat — real coverage, lower urgency than daily):
+
+| Job | Script | Schedule (UTC) | What it proves |
+|---|---|---|---|
+| `postglider-auto-test-runner` | `chaos-onboarding-walkthrough.cjs` | `0 13 * * *` (still daily as of this writing — candidate to move to this tier, not yet decided) | Every dashboard onboarding-checklist link navigates somewhere real; deliberate careless-user mutation testing on a real profile. |
+| `postglider-auto-test-runner-billing` | `billing-02-charge-atomic.cjs` | `0 15 * * 1,3,5` | Real `charge_credits_atomic` RPC contract: accumulation, cycle-rollover, pricing-formula coherence, idempotency. **Its very first scheduled run (2026-09-11) found two real, live regressions** — see "Known live findings" below. |
+| `postglider-auto-test-runner-onboarding-e2e` | `app-17-COLD-free-trial-e2e.cjs --onboarding-only` | `30 15 * * 2,4,6` | The single most comprehensive onboarding test in the repo: free-trial signup → business enrichment → Instagram step → claim → `/generate` smoke check, against a fake fixture business (not a real customer). |
+
+**Weekly** (unchanged, pre-existing): `postglider-auto-test-runner-fuzzer`
+(`chaos-fuzzer.cjs --actions 300`, Sunday) and `postglider-auto-test-runner-detect-splits`
+(`detect-split-accounts.cjs`, Sunday).
+
+### Real bug found and fixed getting `app-17` onto this schedule
+
+`app-17-COLD-free-trial-e2e.cjs` failed its first two live runs in this job pattern —
+`SUPABASE_SERVICE_ROLE_KEY not set`, despite the secret being correctly injected as an env var.
+Root cause: the script destructured only the raw, unresolved `env` dict from its shared
+`testenv.cjs` helper and rebuilt `SUPABASE_URL`/`SERVICE_ROLE_KEY` from it directly — bypassing
+`testenv.cjs`'s own already-correct fallback to `process.env` for exactly this "no `.env.local`
+file in the container" case. Fixed by using `testenv.cjs`'s exported constants directly instead
+of re-deriving them. A second, real, different gap surfaced immediately after: the script's
+default `staytrue` business fixture needs a workspace photo file that isn't present in the
+minimal container (same class of gap `daily-quality-check.cjs` hit for `ref_ken.jpg`, solved
+there via a base64 Secret Manager value). Rather than repeat that fix for a scheduled regression
+test that doesn't need a specific business's branding, the scheduled job simply uses the
+`roccos` fixture instead (`workspacePhoto: null` — no file dependency at all).
+
+### The daily digest — Loops workflow
+
+`send-test-suite-digest.cjs` reads every `test_suite_runs` row not yet digested, buckets them
+(PHP-error-level naming): **Urgent** = a critical-tier job failed, **Prioritized** = an
+important-tier job failed, **Notices** = everything else (including all passing runs — proof of
+life, not just absence of alarm). Fires the `test_suite_digest` Loops event (registered in
+`lib/loops.ts`'s `LoopsEventName` union, same pattern as `gemini_quota_exceeded` and the other
+existing ops-alert events) with the three summaries as event properties.
+
+The actual email is a Loops workflow, built via the Loops MCP API this session:
+**https://app.loops.so/workflows/cmtx2tdul04zk0j0uogxiv4eq** — `EventTrigger` on
+`test_suite_digest` (re-eligible, so it fires every day for the same recipient, not just once
+ever), one email action rendering Urgent → Prioritized → Notices in that order via
+`{event.urgentSummary}` / `{event.prioritizedSummary}` / `{event.noticesSummary}`, all fallback
+values set, Guardian-checked clean.
+
+**One step the API cannot do — you have to click it:** open the workflow link above and click
+**Publish**. Loops' API can build and edit a workflow's graph and content, but activating it
+(`Draft` → live) has no exposed endpoint — confirmed by inspecting `updateWorkflowProperties`'s
+full schema, which has no `status` field. Until that click happens, the workflow sits built and
+tested but not actually sending.
+
+### Known live findings — real regressions the suite has already caught
+
+**`billing-02-charge-atomic`'s very first scheduled run (2026-09-11, Friday 15:00 UTC) found two
+real, live failures**, not test-harness noise:
+1. `current_cycle_start` is not being written back on cycle rollover — the test account's value
+   (`2026-08-17`) is stale, "before this month."
+2. `monthly_limit` from the RPC returns `999999` instead of the formula-derived `585` — looks like
+   an "unlimited" sentinel value is in play somewhere for this account, not simply a stale
+   hardcoded `750` (the original B3 bug this test was written to catch).
+
+Not yet root-caused or fixed as of this writing — flagged here, and will surface again in the
+daily Loops digest once published, so it can't quietly disappear. Check `research/decisions.md`
+for the follow-up entry once investigated.
+
+**The `daily-quality-check` run that prompted re-verifying this whole suite (2026-09-11) also
+found a real gap**: the test account's RobinReach brand has a live Instagram connection but zero
+Facebook connection, and the app's local connection-mirror table had never synced even the
+Instagram one — the daily check correctly reported FAIL rather than a false green. Fix needs a
+real human OAuth click (RobinReach's Magic Connect Link) — cannot be scripted.
+
+### Adding a new scheduled test
+
+1. Confirm the script is genuinely self-contained (Node builtins + npm packages only) OR uses
+   `EXTRA_FILES` for real sibling dependencies — never hand-inline a copy of shared logic.
+2. `gcloud run jobs create postglider-auto-test-runner-<name> --region=us-central1 --image=...:v3 --service-account=731600875541-compute@developer.gserviceaccount.com --set-env-vars="REPO_OVERRIDE=...,BRANCH_OVERRIDE=...,JOB_NAME=<script-basename>,TIER=<critical|important>[,EXTRA_FILES=...]" --set-secrets="GITHUB_PAT=...,SUPABASE_SERVICE_ROLE_KEY=...[,<other secrets>]" --args="<path-to-script>[,<script args>]"`
+   — note: if any env-var VALUE itself contains a comma (like `EXTRA_FILES`), use gcloud's
+   custom-delimiter syntax: `--set-env-vars="^;^KEY1=val1;KEY2=val,with,commas"`.
+3. `gcloud run jobs add-iam-policy-binding <job> --region=us-central1 --member="serviceAccount:postglider-cron-invoker@postglider-prod.iam.gserviceaccount.com" --role="roles/run.invoker"`
+4. `gcloud scheduler jobs create http <job>-schedule --location=us-central1 --schedule="<cron>" --uri=".../jobs/<job>:run" --http-method=POST --oauth-service-account-email="postglider-cron-invoker@postglider-prod.iam.gserviceaccount.com"`
+5. **Run it live once manually before trusting the schedule** — `gcloud run jobs execute <job> --region=us-central1`, then check `gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="<job>"' --freshness=10m`. Every job in this family that skipped this step on first deploy has hit a real, container-specific bug (missing env fallback, missing fixture file, missing secret) that never showed up running locally.
+
+---
+
 ## Backend Admin API
 
 Operations requiring the service-role key:
