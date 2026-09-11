@@ -111,7 +111,7 @@ Fast, pure-function tests — no browser, no dev server, no real API calls, no b
 | `niche-intelligence-01-goth-tattoo` | real generated content | Acceptance test with a defined, code-checked acceptance bar (vocabulary hit-count, word-count limits) against real AI-generated content — not an LLM's subjective opinion. |
 | `test-text-legibility-fallback-202607` | n/a (unit, direct import) | 4 explicit assertions calling the actual production `detectImageDefect`/`resolveDefectFallback` functions directly (imported, not reimplemented). |
 | `social-01-fb-publish` | `kenlyle+2@gmail.com` (real) | End-to-end Facebook publish: generate idea, save, select page, publish, verify success badge. Most of Suite 3 silently skips if Facebook isn't connected, and the AI-generation step can silently no-op in headless mode ("Turnstile not bypassed"), which cascades to skipping save/publish too. |
-| `social-03-token-health` | `kenlyle+2@gmail.com` (real) | Supabase-admin audit of OAuth token health: refresh_token presence, expiry windows, schema compatibility. Silently skips a platform entirely if the account has zero connections for it. |
+| `social-03-token-health` (RETIRED 2026-09-11) | n/a | Checked `social_connections` — a table with zero live rows and zero app-code readers once Facebook/LinkedIn/Instagram moved to RobinReach (D-2026-09-10g/h/k), which manages its own OAuth refresh and needs no local token-health check. GMB uses a separate mechanism (`profiles.google_refresh_token`) this script never covered. Deleted rather than scheduled — see `research/decisions.md` D-2026-09-11c. |
 | `billing-01-woo-webhook` | `kenlyle+2@gmail.com` (real, state-mutating) | WooCommerce/Bit-Integrations webhook auth + contract against the live deployed function: 401/405 checks always run; the functional cancel/idempotency/unknown-customer checks only run if `WOO_WEBHOOK_SECRET` is set locally. |
 | `billing-02-charge-atomic` | `kenlyle+2@gmail.com` (real, state-mutating, restored after) | Direct RPC regression test of `charge_credits_atomic` against two named historical bugs: sequential-charge accumulation and stale-cycle rollover, plus a live pricing-formula check and an idempotency-key check. Real functional coverage of real billing logic, not a shape check. |
 
@@ -330,13 +330,13 @@ aren't persisted anywhere else; testimonials and the schedule reasoning are re-f
 
 **`app-12-butler-e2e`** is the integration test for Butler — the AI backlog scoring agent. It runs after the core app tests because it depends on `kenlyle+2@gmail.com` having a Pro tier and existing `business_profiles` rows (verified by `app-01-ux` and `app-02-usage`). The 8-phase structure mirrors the user journey: seed data → score → UI surface → approve → skip. DB assertions via service role make the pass/fail binary — not subject to timing or UI rendering quirks.
 
-**`social-01-fb-publish` → `social-03-token-health`** form the social-publishing validation stack
-(`social-02-api-contract` and `social-04-multi-publish` were deleted 2026-09-10 along with the
-rest of PostForMe — both tested PostForMe-only endpoints/columns with no RobinReach equivalent
-built; see `TASKS.md`'s "PostForMe removal — DONE" entry):
-
-1. `social-01-fb-publish` is the slow, expensive E2E (~90s): real browser, real generation, real API call to Facebook.
-2. `social-03-token-health` is the proactive monitor: it queries `social_connections` via Supabase admin to warn if any OAuth token expires within 7 days.
+**`social-01-fb-publish`** is the remaining social-publishing validation script — the slow,
+expensive E2E (~90s): real browser, real generation, real API call to Facebook. (`social-02-api-
+contract` and `social-04-multi-publish` were deleted 2026-09-10 along with the rest of PostForMe;
+`social-03-token-health` was retired 2026-09-11 — it checked `social_connections`, a table with
+zero live rows once Facebook/LinkedIn/Instagram moved to RobinReach, which manages its own OAuth
+refresh. See `TASKS.md`'s "PostForMe removal — DONE" entry and `research/decisions.md`
+D-2026-09-11c.)
 
 ---
 
@@ -918,12 +918,16 @@ End-to-end Facebook publish flow. Calls `cleanupTestUserData` before launch.
 
 ---
 
-### social-03-token-health
+### social-03-token-health (RETIRED 2026-09-11)
 
-**No screenshots.** Pure Supabase admin API queries.
-**Target account:** `kenlyle+2@gmail.com`
+**No longer exists — deleted, not just unscheduled.** Left here as historical record of what it
+checked; see `research/decisions.md` D-2026-09-11c for why. `social_connections` (the table it
+audited) has zero live rows and zero app-code readers — Facebook/LinkedIn/Instagram moved to
+RobinReach, which manages its own OAuth refresh, and GMB uses a different mechanism entirely
+(`profiles.google_refresh_token`). Scheduling this script as-is would have reported "0
+connections found" forever, a misleadingly clean result for a check that verified nothing.
 
-Proactive OAuth token audit. Queries `social_connections` via the service role and validates every connection row against the schema `oauthManager.ts` expects.
+Proactive OAuth token audit. Queried `social_connections` via the service role and validated every connection row against the schema `oauthManager.ts` expects.
 
 **Google Business Profile checks:**
 - `refresh_token` exists — without it, proactive refresh fails and posts stop working after 1 hour
